@@ -1,0 +1,71 @@
+{
+  "expo": {
+    "name": "Fascicoli Fotografici",
+    "slug": "fascicoli-fotografici",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.tuaazienda.fascicolifotografici",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Necessario per scattare foto da aggiungere ai fascicoli.",
+        "NSPhotoLibraryUsageDescription": "Necessario per selezionare foto dalla libreria.",
+        "NSPhotoLibraryAddUsageDescription": "Necessario per salvare foto nella libreria."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#6366F1"
+      },
+      "package": "com.tuaazienda.fascicolifotografici",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "fascicoli",
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Consenti l'accesso alla fotocamera per scattare foto."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Consenti l'accesso alle foto per selezionarle dai fascicoli."
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "0180b4a3-07eb-4047-b0d4-2e97954f3d73"
+      }
+    },
+    "owner": "emmanuellimardi"
+  }
+}
