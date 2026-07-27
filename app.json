@@ -3,20 +3,26 @@
     "name": "Fascicoli Fotografici",
     "slug": "fascicoli-fotografici",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0180b4a3-07eb-4047-b0d4-2e97954f3d73"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#050C1C"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.tuaazienda.fascicolifotografici",
+      "bundleIdentifier": "com.infinitek.fascicolifotografici",
       "infoPlist": {
         "NSCameraUsageDescription": "Necessario per scattare foto da aggiungere ai fascicoli.",
         "NSPhotoLibraryUsageDescription": "Necessario per selezionare foto dalla libreria.",
@@ -24,19 +30,17 @@
       }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#6366F1"
+        "backgroundColor": "#050C1C"
       },
-      "package": "com.tuaazienda.fascicolifotografici",
+      "package": "com.infinitek.fascicolifotografici",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.RECORD_AUDIO"
       ]
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
     },
     "scheme": "fascicoli",
     "plugins": [
@@ -66,6 +70,11 @@
         "projectId": "0180b4a3-07eb-4047-b0d4-2e97954f3d73"
       }
     },
-    "owner": "emmanuellimardi"
+    "owner": "emmanuellimardi",
+    "backgroundColor": "#F3F6FA",
+    "platforms": [
+      "ios",
+      "android"
+    ]
   }
 }

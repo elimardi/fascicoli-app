@@ -1,21 +1,49 @@
 /**
  * @file services/webservice.service.ts
  * Gestione delle chiamate HTTP al webservice esterno.
- * Costruisce il payload multipart/form-data con le foto binarie,
- * gestisce autenticazione Bearer, timeout configurabile e
- * salva l'esito (successo o errore) nel database locale.
+ *
+ * Flusso di autenticazione a due step:
+ * 1. POST {auth_endpoint} con { therm_token, grant_type: "therm_token" }
+ *    → risposta: { access_token, token_type, expires_in }
+ * 2. PUT {invio_endpoint} con header "Authorization: Bearer {access_token}"
+ *    e body JSON:
+ *    {
+ *      "DocumentoVendita": "2026/DV/000001",
+ *      "JSON": {
+ *        "DocumentiDigitale": [
+ *          {
+ *            "bytes": "<base64>",
+ *            "nome_file": "Foto1.jpg",
+ *            "descrizione": "<da Impostazioni, opzionale>",
+ *            "catalogo": "<da Impostazioni, opzionale>"
+ *          }, ...
+ *        ]
+ *      }
+ *    }
+ *
+ * L'access token viene cachato in DB e riutilizzato fino alla scadenza
+ * (con margine di sicurezza). In caso di 401 viene invalidato e la
+ * richiesta viene ritentata una sola volta con un token nuovo.
  */
 
 import axios, { AxiosError, type AxiosInstance } from 'axios';
-import * as FileSystem from 'expo-file-system';
-import { getConfigOrThrow } from './config.service';
+import { File } from 'expo-file-system';
+import {
+  getConfigOrThrow,
+  getTokenCache,
+  salvaTokenCache,
+  invalidaTokenCache,
+} from './config.service';
 import { segnaFascicoloInviato, segnaFascicoloErrore } from './fascicoli.service';
 import { getFotoByFascicolo } from './foto.service';
 import { validateCodiceDocumento } from './fascicoli.service';
+import { TOKEN_EXPIRY_MARGIN_MS } from '@/constants';
 import type {
+  ConfigWebservice,
   Fascicolo,
   InvioResult,
   TestConnessioneResult,
+  TokenResponse,
   WebserviceResponse,
 } from '@/types';
 
@@ -28,24 +56,96 @@ import type {
  * L'istanza viene ricreata ad ogni invio per rispecchiare la
  * configurazione più recente (l'utente potrebbe averla cambiata).
  *
- * @param baseUrl   - URL base del webservice
- * @param token     - Token Bearer per l'autenticazione
- * @param timeoutMs - Timeout in millisecondi
- * @returns         Istanza Axios configurata
+ * @param baseUrl     - URL base del webservice
+ * @param timeoutMs   - Timeout in millisecondi
+ * @param bearerToken - Access token per l'header Authorization (opzionale:
+ *                      l'endpoint di autenticazione non lo richiede)
+ * @returns           Istanza Axios configurata
  */
 function createAxiosInstance(
   baseUrl: string,
-  token: string,
-  timeoutMs: number
+  timeoutMs: number,
+  bearerToken?: string
 ): AxiosInstance {
   return axios.create({
     baseURL: baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`,
     timeout: timeoutMs,
     headers: {
-      Authorization: `Bearer ${token}`,
       Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
     },
   });
+}
+
+// ─────────────────────────────────────────────
+// AUTENTICAZIONE OAUTH — step 1
+// ─────────────────────────────────────────────
+
+/**
+ * Richiede un nuovo access token all'endpoint di autenticazione.
+ *
+ * @param config - Configurazione webservice corrente
+ * @returns      Promise con la risposta token del server
+ * @throws       Error se il server non restituisce un access_token valido
+ *
+ * @example
+ * // POST http://10.0.0.10:10101/panth01/api/authenticate/oauth/token
+ * // { "therm_token": "qJFasDuvmM", "grant_type": "therm_token" }
+ */
+async function richiediAccessToken(
+  config: ConfigWebservice
+): Promise<TokenResponse> {
+  const axiosInstance = createAxiosInstance(config.base_url, config.timeout_ms);
+
+  const response = await axiosInstance.post<TokenResponse>(
+    config.auth_endpoint,
+    {
+      therm_token: config.therm_token,
+      grant_type:  'therm_token',
+    }
+  );
+
+  const data = response.data;
+  if (!data || typeof data.access_token !== 'string' || !data.access_token) {
+    throw new Error(
+      'Autenticazione fallita: il server non ha restituito un access_token valido.'
+    );
+  }
+
+  return {
+    access_token: data.access_token,
+    token_type:   data.token_type ?? 'Bearer',
+    expires_in:   typeof data.expires_in === 'number' ? data.expires_in : 3600,
+  };
+}
+
+/**
+ * Restituisce un access token valido, riutilizzando la cache quando possibile.
+ *
+ * - Se in cache c'è un token non scaduto (con margine di sicurezza), lo riusa.
+ * - Altrimenti ne richiede uno nuovo e aggiorna la cache.
+ *
+ * @param config       - Configurazione webservice corrente
+ * @param forceRefresh - Se true ignora la cache (usato dopo un 401)
+ * @returns            Promise con l'access token
+ */
+async function getAccessToken(
+  config: ConfigWebservice,
+  forceRefresh = false
+): Promise<string> {
+  if (!forceRefresh) {
+    const cached = await getTokenCache();
+    if (cached && cached.expires_at - TOKEN_EXPIRY_MARGIN_MS > Date.now()) {
+      return cached.access_token;
+    }
+  }
+
+  const token = await richiediAccessToken(config);
+  const expiresAt = Date.now() + token.expires_in * 1000;
+  await salvaTokenCache(token.access_token, expiresAt);
+
+  return token.access_token;
 }
 
 // ─────────────────────────────────────────────
@@ -54,74 +154,59 @@ function createAxiosInstance(
 
 /**
  * Legge un file foto dal filesystem e lo converte in base64.
- * Usato per costruire il payload multipart senza dipendere
- * da FormData nativo (non sempre disponibile in React Native).
  *
  * @param percorso - Percorso assoluto del file
  * @returns        Stringa base64 del contenuto del file
  * @throws         Error se il file non esiste o la lettura fallisce
  */
 async function leggiFileBase64(percorso: string): Promise<string> {
-  const info = await FileSystem.getInfoAsync(percorso);
-  if (!info.exists) {
+  const file = new File(percorso);
+  if (!file.exists) {
     throw new Error(`File non trovato: ${percorso}`);
   }
 
-  const base64 = await FileSystem.readAsStringAsync(percorso, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  return file.base64();
+}
 
-  return base64;
+// ─────────────────────────────────────────────
+// HELPERS — payload JSON documenti digitali
+// ─────────────────────────────────────────────
+
+/** Singolo documento digitale nel payload di invio. */
+interface DocumentoDigitale {
+  bytes: string;
+  nome_file: string;
+  /** Descrizione configurata in Impostazioni — omessa se non valorizzata */
+  descrizione?: string;
+  /** Catalogo configurato in Impostazioni — omesso se non valorizzato */
+  catalogo?: string;
+}
+
+/** Payload completo dell'endpoint di invio documenti. */
+interface InvioDocumentiPayload {
+  DocumentoVendita: string;
+  JSON: {
+    DocumentiDigitale: DocumentoDigitale[];
+  };
 }
 
 /**
- * Costruisce il boundary per il multipart/form-data.
- * Genera un valore univoco ad ogni invocazione.
+ * Costruisce il payload JSON atteso dall'endpoint di invio.
  *
- * @returns Stringa boundary
+ * @param documentoVendita - Codice documento (es. "2026/DV/000001")
+ * @param documenti        - Foto in base64 con relativo nome file
+ * @returns                Payload tipizzato pronto per la PUT
  */
-function generaBoundary(): string {
-  return `----FascicoliBoundary${Date.now()}${Math.random().toString(36).slice(2)}`;
-}
-
-/**
- * Costruisce manualmente il body multipart/form-data.
- * React Native non supporta il FormData nativo con file binari
- * in tutti i contesti — questa implementazione è più affidabile.
- *
- * @param codiceDocumento - Campo testuale del form
- * @param fotoBase64List  - Array di { base64, nomeFile } per ogni foto
- * @param boundary        - Boundary del multipart
- * @returns               Body come stringa raw del multipart
- */
-function costruisciMultipartBody(
-  codiceDocumento: string,
-  fotoBase64List: Array<{ base64: string; nomeFile: string }>,
-  boundary: string
-): string {
-  const CRLF = '\r\n';
-  let body = '';
-
-  // Campo testuale: codice_documento
-  body += `--${boundary}${CRLF}`;
-  body += `Content-Disposition: form-data; name="codice_documento"${CRLF}`;
-  body += CRLF;
-  body += `${codiceDocumento}${CRLF}`;
-
-  // Campi file: foto[]
-  for (const { base64, nomeFile } of fotoBase64List) {
-    body += `--${boundary}${CRLF}`;
-    body += `Content-Disposition: form-data; name="foto[]"; filename="${nomeFile}"${CRLF}`;
-    body += `Content-Type: image/jpeg${CRLF}`;
-    body += `Content-Transfer-Encoding: base64${CRLF}`;
-    body += CRLF;
-    body += `${base64}${CRLF}`;
-  }
-
-  // Chiusura multipart
-  body += `--${boundary}--${CRLF}`;
-
-  return body;
+function costruisciPayloadDocumenti(
+  documentoVendita: string,
+  documenti: DocumentoDigitale[]
+): InvioDocumentiPayload {
+  return {
+    DocumentoVendita: documentoVendita,
+    JSON: {
+      DocumentiDigitale: documenti,
+    },
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -130,7 +215,6 @@ function costruisciMultipartBody(
 
 /**
  * Estrae un messaggio di errore leggibile da un errore Axios.
- * Gestisce i tre casi principali: risposta HTTP, timeout/rete, setup.
  *
  * @param error - Errore catturato nel catch
  * @returns     Messaggio di errore human-readable
@@ -140,12 +224,14 @@ function estraiMessaggioErrore(error: unknown): string {
     const axiosErr = error as AxiosError<WebserviceResponse>;
 
     if (axiosErr.response) {
-      // Il server ha risposto con status 4xx/5xx
       const status = axiosErr.response.status;
       const serverMsg =
         axiosErr.response.data?.error ??
         axiosErr.response.data?.message ??
         axiosErr.message;
+      if (status === 401 || status === 403) {
+        return `Autenticazione rifiutata (${status}): verifica il therm token nelle Impostazioni.`;
+      }
       return `Errore server (${status}): ${serverMsg}`;
     }
 
@@ -169,8 +255,6 @@ function estraiMessaggioErrore(error: unknown): string {
 
 /**
  * Serializza in modo sicuro un oggetto in JSON.
- * Se la serializzazione fallisce (riferimenti circolari, ecc.)
- * restituisce una stringa di fallback.
  *
  * @param data - Dato da serializzare
  * @returns    Stringa JSON o stringa di errore
@@ -183,32 +267,31 @@ function serializzaEsito(data: unknown): string {
   }
 }
 
+/** True se l'errore è una risposta HTTP 401 (token scaduto/revocato). */
+function isUnauthorized(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 401;
+}
+
 // ─────────────────────────────────────────────
 // EXPORT PRINCIPALE — INVIO FASCICOLO
 // ─────────────────────────────────────────────
 
 /**
- * Invia un fascicolo al webservice esterno come multipart/form-data.
+ * Invia un fascicolo al webservice esterno.
  *
  * Flusso:
- * 1. Legge la configurazione webservice dal DB (o lancia errore)
- * 2. Valida il codice documento
- * 3. Recupera le foto del fascicolo dal DB
- * 4. Legge i file binari dal filesystem (base64)
- * 5. Costruisce il payload multipart
- * 6. Esegue la POST con Axios
+ * 1. Valida il codice documento
+ * 2. Legge la configurazione webservice dal DB (o lancia errore)
+ * 3. Recupera le foto del fascicolo dal DB e le legge in base64
+ * 4. Ottiene un access token (cache o nuova autenticazione)
+ * 5. Esegue la PUT sull'endpoint di invio con payload JSON
+ * 6. Su 401: invalida il token, si riautentica e ritenta una volta
  * 7. In caso di successo (2xx): salva esito + segna "inviato"
  * 8. In caso di errore: salva messaggio + segna "errore"
  *
  * @param fascicolo       - Fascicolo da inviare (deve avere stato 'bozza')
- * @param codiceDocumento - Codice documento inserito dall'utente
+ * @param codiceDocumento - Codice documento di vendita (es. "2026/DV/000001")
  * @returns               `InvioResult` con esito e messaggio toast
- *
- * @example
- * const result = await inviaFascicolo(fascicolo, '2024/DOC/001');
- * if (result.success) {
- *   Toast.show({ type: 'success', text1: result.messaggio });
- * }
  */
 export async function inviaFascicolo(
   fascicolo: Fascicolo,
@@ -225,7 +308,7 @@ export async function inviaFascicolo(
   }
 
   // ── 2. Configurazione webservice ──
-  let config;
+  let config: ConfigWebservice;
   try {
     config = await getConfigOrThrow();
   } catch (error) {
@@ -258,77 +341,59 @@ export async function inviaFascicolo(
     };
   }
 
-  // ── 4. Lettura file binari ──
-  const fotoBase64List: Array<{ base64: string; nomeFile: string }> = [];
+  // ── Lettura file binari ──
+  const documenti: DocumentoDigitale[] = [];
+
+  // Attributi comuni presi dalla configurazione: vengono inclusi solo se
+  // valorizzati, così con i campi vuoti il payload resta identico a prima.
+  const attributiFoto: Pick<DocumentoDigitale, 'descrizione' | 'catalogo'> = {
+    ...(config.descrizione_foto.trim()
+      ? { descrizione: config.descrizione_foto.trim() }
+      : {}),
+    ...(config.catalogo_foto.trim()
+      ? { catalogo: config.catalogo_foto.trim() }
+      : {}),
+  };
 
   for (const f of foto) {
     try {
       const base64 = await leggiFileBase64(f.percorso_locale);
-      fotoBase64List.push({ base64, nomeFile: f.nome_file });
-    } catch (error) {
+      documenti.push({ bytes: base64, nome_file: f.nome_file, ...attributiFoto });
+    } catch {
       const msg = `File foto mancante: ${f.nome_file}. Rimuovila e riprova.`;
       await segnaFascicoloErrore(fascicolo.id, serializzaEsito({ errore: msg }));
       return { success: false, esitoJson: serializzaEsito({ errore: msg }), messaggio: msg };
     }
   }
 
-  // ── 5. Costruzione payload multipart ──
-  const boundary = generaBoundary();
-  const body = costruisciMultipartBody(
-    codiceDocumento.trim(),
-    fotoBase64List,
-    boundary
-  );
+  const payload = costruisciPayloadDocumenti(codiceDocumento.trim(), documenti);
 
-  // ── 6. Chiamata HTTP ──
-  const axiosInstance = createAxiosInstance(
-    config.base_url,
-    config.auth_token,
-    config.timeout_ms
-  );
-
+  // Salva subito il codice documento sul fascicolo (anche se l'invio poi
+  // fallisce): così un eventuale "Riprova invio" lo trova precompilato.
   try {
-    const response = await axiosInstance.post<WebserviceResponse>(
-      'fascicoli',
-      body,
-      {
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        },
-      }
+    const db = (await import('./db')).getDb();
+    await db.runAsync(
+      'UPDATE fascicoli SET codice_documento = ? WHERE id = ?',
+      codiceDocumento.trim(),
+      fascicolo.id
     );
+  } catch {
+    // Non critico
+  }
 
-    // ── 7. Successo 2xx ──
-    const esitoJson = serializzaEsito(response.data);
-    await segnaFascicoloInviato(fascicolo.id, esitoJson);
-
-    // Salva anche il codice documento sul fascicolo
-    try {
-      const db = (await import('./db')).getDb();
-      await db.runAsync(
-        'UPDATE fascicoli SET codice_documento = ? WHERE id = ?',
-        codiceDocumento.trim(),
-        fascicolo.id
-      );
-    } catch {
-      // Non critico se il salvataggio del codice fallisce
-    }
-
-    return {
-      success:   true,
-      esitoJson,
-      messaggio: 'Fascicolo inviato al gestionale con successo.',
-    };
+  // ── 4–6. Autenticazione + PUT con retry su 401 ──
+  let response;
+  try {
+    response = await eseguiPutConRetry(config, payload);
   } catch (error) {
-    // ── 8. Errore HTTP o di rete ──
     const msg = estraiMessaggioErrore(error);
     const esitoJson = serializzaEsito({
       errore:    msg,
       timestamp: new Date().toISOString(),
       ...(axios.isAxiosError(error) && error.response
         ? {
-            status:   error.response.status,
-            data:     error.response.data,
+            status: error.response.status,
+            data:   error.response.data,
           }
         : {}),
     });
@@ -341,6 +406,50 @@ export async function inviaFascicolo(
       messaggio: msg,
     };
   }
+
+  // ── 7. Successo 2xx ──
+  const esitoJson = serializzaEsito(response.data);
+  await segnaFascicoloInviato(fascicolo.id, esitoJson);
+
+  return {
+    success:   true,
+    esitoJson,
+    messaggio: 'Fascicolo inviato al gestionale con successo.',
+  };
+}
+
+/**
+ * Esegue la PUT dei documenti gestendo il ciclo di vita del token:
+ * primo tentativo con token (eventualmente cachato); se il server
+ * risponde 401 il token viene invalidato e la richiesta ritentata
+ * una sola volta con un token appena emesso.
+ *
+ * @param config  - Configurazione webservice
+ * @param payload - Payload JSON dei documenti
+ * @returns       Risposta Axios in caso di successo
+ * @throws        Errore Axios/generico se anche il retry fallisce
+ */
+async function eseguiPutConRetry(
+  config: ConfigWebservice,
+  payload: InvioDocumentiPayload
+) {
+  let token = await getAccessToken(config);
+
+  try {
+    const axiosInstance = createAxiosInstance(config.base_url, config.timeout_ms, token);
+    return await axiosInstance.put<WebserviceResponse>(config.invio_endpoint, payload);
+  } catch (error) {
+    if (!isUnauthorized(error)) {
+      throw error;
+    }
+
+    // Token scaduto o revocato: nuovo token e un solo retry
+    await invalidaTokenCache();
+    token = await getAccessToken(config, true);
+
+    const axiosInstance = createAxiosInstance(config.base_url, config.timeout_ms, token);
+    return await axiosInstance.put<WebserviceResponse>(config.invio_endpoint, payload);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -348,21 +457,19 @@ export async function inviaFascicolo(
 // ─────────────────────────────────────────────
 
 /**
- * Esegue un test di connessione al webservice (GET ping).
- * Misura la latenza e restituisce il risultato per la UI
- * della schermata Impostazioni.
- *
- * Tenta prima GET su `{base_url}/ping`, poi su `{base_url}/`
- * come fallback per webservice che non espongono /ping.
+ * Esegue un test di connessione al webservice tentando una
+ * autenticazione reale sull'endpoint OAuth configurato.
+ * È il test più significativo possibile: verifica URL, rete,
+ * endpoint e validità del therm token in un colpo solo.
  *
  * @returns Promise con `TestConnessioneResult`
  *
  * @example
  * const result = await testConnessione();
- * // { success: true, latenza_ms: 142, messaggio: 'Connessione riuscita (142 ms)' }
+ * // { success: true, latenza_ms: 142, messaggio: 'Autenticazione riuscita (142 ms)' }
  */
 export async function testConnessione(): Promise<TestConnessioneResult> {
-  let config;
+  let config: ConfigWebservice;
   try {
     config = await getConfigOrThrow();
   } catch (error) {
@@ -373,60 +480,31 @@ export async function testConnessione(): Promise<TestConnessioneResult> {
     };
   }
 
-  const axiosInstance = createAxiosInstance(
-    config.base_url,
-    config.auth_token,
-    Math.min(config.timeout_ms, 10_000) // Cap a 10s per il ping
-  );
-
   const startTime = Date.now();
 
-  // Prova prima /ping, poi / come fallback
-  const endpoints = ['ping', ''];
+  try {
+    const token = await richiediAccessToken({
+      ...config,
+      timeout_ms: Math.min(config.timeout_ms, 10_000), // Cap a 10s per il test
+    });
 
-  for (const endpoint of endpoints) {
-    try {
-      await axiosInstance.get(endpoint);
-      const latenza = Date.now() - startTime;
-      return {
-        success:    true,
-        latenza_ms: latenza,
-        messaggio:  `Connessione riuscita (${latenza} ms)`,
-      };
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        // Status 4xx = server raggiungibile ma endpoint non trovato
-        // Lo consideriamo comunque una connessione riuscita
-        if (error.response && error.response.status < 500) {
-          const latenza = Date.now() - startTime;
-          return {
-            success:    true,
-            latenza_ms: latenza,
-            messaggio:  `Server raggiungibile (${latenza} ms) — status ${error.response.status}`,
-          };
-        }
+    // Aggiorna la cache: il token appena emesso è riutilizzabile
+    await salvaTokenCache(
+      token.access_token,
+      Date.now() + token.expires_in * 1000
+    );
 
-        // Timeout o rete irraggiungibile: non tentare il fallback
-        if (
-          error.code === 'ECONNABORTED' ||
-          error.code === 'ERR_NETWORK' ||
-          !error.response
-        ) {
-          const msg = estraiMessaggioErrore(error);
-          return {
-            success:    false,
-            latenza_ms: null,
-            messaggio:  msg,
-          };
-        }
-      }
-      // 5xx o altro: prova il prossimo endpoint
-    }
+    const latenza = Date.now() - startTime;
+    return {
+      success:    true,
+      latenza_ms: latenza,
+      messaggio:  `Autenticazione riuscita (${latenza} ms) — token valido ${token.expires_in}s`,
+    };
+  } catch (error) {
+    return {
+      success:    false,
+      latenza_ms: null,
+      messaggio:  estraiMessaggioErrore(error),
+    };
   }
-
-  return {
-    success:    false,
-    latenza_ms: null,
-    messaggio:  'Impossibile raggiungere il webservice. Verifica URL e token.',
-  };
 }

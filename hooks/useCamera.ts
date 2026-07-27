@@ -8,7 +8,7 @@
 import { useState, useCallback } from 'react';
 import { Alert, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera } from 'expo-camera';
+import { Camera, type CameraView } from 'expo-camera';
 
 // ─────────────────────────────────────────────
 // TIPI
@@ -36,7 +36,7 @@ export interface UseCameraResult {
 
   // ── Azioni ──
   apriLibreria: () => Promise<FotoScattata | null>;
-  scattaFoto: (cameraRef: React.RefObject<Camera>) => Promise<FotoScattata | null>;
+  scattaFoto: (cameraRef: React.RefObject<CameraView | null>) => Promise<FotoScattata | null>;
 }
 
 // ─────────────────────────────────────────────
@@ -176,7 +176,7 @@ export function useCamera(): UseCameraResult {
    * @returns         `FotoScattata` con URI e dimensioni, o `null`
    */
   const scattaFoto = useCallback(
-    async (cameraRef: React.RefObject<Camera>): Promise<FotoScattata | null> => {
+    async (cameraRef: React.RefObject<CameraView | null>): Promise<FotoScattata | null> => {
       if (!cameraRef.current) {
         console.warn('[useCamera] Camera ref non disponibile.');
         return null;

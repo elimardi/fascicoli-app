@@ -24,7 +24,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { useFascicoliStore } from '@/store/fascicoli.store';
 import { FascicoloCard, EmptyState } from '@/components';
+import { IconCartella } from '@/components/EmptyState';
 import { TOAST_MESSAGES } from '@/constants';
+import { Colors, Radius, overline, raisedShadow } from '@/constants/theme';
 import type { FascicoloConFoto } from '@/services/fascicoli.service';
 
 // ─────────────────────────────────────────────
@@ -134,7 +136,7 @@ export default function FascicoliScreen() {
   if (isLoading && fascicoli.length === 0) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#6366F1" />
+        <ActivityIndicator size="large" color={Colors.primary} />
       </View>
     );
   }
@@ -154,13 +156,13 @@ export default function FascicoliScreen() {
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
-            tintColor="#6366F1"
-            colors={['#6366F1']}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
         }
         ListEmptyComponent={
           <EmptyState
-            icon="🗂️"
+            iconNode={<IconCartella />}
             title="Nessun fascicolo"
             subtitle="Crea il tuo primo fascicolo fotografico per iniziare a raccogliere le foto."
             ctaLabel="Crea fascicolo"
@@ -171,7 +173,7 @@ export default function FascicoliScreen() {
           fascicoli.length > 0 ? (
             <View style={styles.header}>
               <Text style={styles.headerCount}>
-                {fascicoli.length}{' '}
+                Archivio  ·  {fascicoli.length}{' '}
                 {fascicoli.length === 1 ? 'fascicolo' : 'fascicoli'}
               </Text>
             </View>
@@ -202,23 +204,22 @@ export default function FascicoliScreen() {
 const styles = StyleSheet.create({
   container: {
     flex:            1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Colors.bg,
   },
   lista: {
-    paddingTop: 8,
+    paddingTop: 6,
   },
   listaVuota: {
     flex:            1,
     justifyContent:  'center',
   },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical:   8,
+    paddingHorizontal: 20,
+    paddingTop:        10,
+    paddingBottom:     6,
   },
   headerCount: {
-    fontSize:   13,
-    color:      '#9CA3AF',
-    fontWeight: '500',
+    ...overline,
   },
   loadingContainer: {
     flex:           1,
@@ -234,14 +235,14 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize:  15,
-    color:     '#6B7280',
+    color:     Colors.inkMuted,
     textAlign: 'center',
   },
   retryButton: {
-    backgroundColor:   '#6366F1',
+    backgroundColor:   Colors.primary,
     paddingHorizontal: 20,
     paddingVertical:   10,
-    borderRadius:      8,
+    borderRadius:      Radius.sm,
   },
   retryText: {
     color:      '#FFFFFF',
@@ -252,20 +253,16 @@ const styles = StyleSheet.create({
     right:           20,
     width:           56,
     height:          56,
-    borderRadius:    28,
-    backgroundColor: '#6366F1',
+    borderRadius:    18,
+    backgroundColor: Colors.primary,
     alignItems:      'center',
     justifyContent:  'center',
-    shadowColor:     '#6366F1',
-    shadowOffset:    { width: 0, height: 4 },
-    shadowOpacity:   0.35,
-    shadowRadius:    8,
-    elevation:       6,
+    ...raisedShadow,
   },
   fabIcon: {
-    fontSize:   28,
+    fontSize:   30,
     color:      '#FFFFFF',
     fontWeight: '300',
-    lineHeight: 32,
+    lineHeight: 34,
   },
 });

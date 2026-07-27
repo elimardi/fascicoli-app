@@ -14,6 +14,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
+  Image,
+  Modal,
   ScrollView,
   StyleSheet,
   RefreshControl,
@@ -21,14 +23,25 @@ import {
   Alert,
   ActivityIndicator,
   TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { useFascicolo } from '@/hooks/useFascicolo';
+import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
 import { validateCodiceDocumento } from '@/services/fascicoli.service';
 import { StatusBadge, FotoGrid, LoadingButton } from '@/components';
-import { TOAST_MESSAGES } from '@/constants';
+import { TOAST_MESSAGES, STATO_COLORS } from '@/constants';
+import {
+  Colors,
+  Radius,
+  MONO_FONT,
+  SPINE_WIDTH,
+  overline,
+  sectionCard,
+} from '@/constants/theme';
 import type { Foto } from '@/types';
 
 // ─────────────────────────────────────────────
@@ -72,9 +85,9 @@ function EsitoCard({ esitoJson, dataInvio, isErrore }: EsitoCardProps) {
     // Lascia il testo così com'è se non è JSON valido
   }
 
-  const borderColor = isErrore ? '#FCA5A5' : '#6EE7B7';
-  const bgColor     = isErrore ? '#FFF5F5' : '#F0FDF4';
-  const labelColor  = isErrore ? '#991B1B' : '#065F46';
+  const borderColor = isErrore ? Colors.dangerBorder : Colors.successBorder;
+  const bgColor     = isErrore ? Colors.dangerTint    : Colors.successTint;
+  const labelColor  = isErrore ? Colors.dangerText    : Colors.successText;
 
   return (
     <View style={[esitoStyles.card, { borderColor, backgroundColor: bgColor }]}>
@@ -120,6 +133,7 @@ export default function DettaglioFascicoloScreen() {
     erroreDettaglio,
     erroreInvio,
     refresh,
+    aggiorna,
     eliminaFoto,
     riordina,
     invia,
@@ -129,6 +143,11 @@ export default function DettaglioFascicoloScreen() {
   const [codiceDocumento,  setCodiceDocumento]  = useState('');
   const [erroreCodice,     setErroreCodice]     = useState<string | null>(null);
   const [isRefreshing,     setIsRefreshing]     = useState(false);
+  const [riordinoAttivo,   setRiordinoAttivo]   = useState(false);
+  const [fotoAperta,       setFotoAperta]       = useState<Foto | null>(null);
+
+  // Gestione tastiera: scroll dell'input attivo sopra la tastiera
+  const { scrollRef, keyboardHeight, scrollToFocusedInput } = useKeyboardScroll();
 
   // ── Aggiorna il titolo dell'header quando il fascicolo è caricato ──
   useEffect(() => {
@@ -143,6 +162,13 @@ export default function DettaglioFascicoloScreen() {
       setCodiceDocumento(fascicolo.codice_documento);
     }
   }, [fascicolo?.codice_documento]);
+
+  // ── Esce dalla modalità riordino se non più applicabile ──
+  useEffect(() => {
+    if (riordinoAttivo && (foto.length < 2 || fascicolo?.stato !== 'bozza')) {
+      setRiordinoAttivo(false);
+    }
+  }, [riordinoAttivo, foto.length, fascicolo?.stato]);
 
   // ─────────────────────────────────────────
   // HANDLERS
@@ -192,6 +218,32 @@ export default function DettaglioFascicoloScreen() {
     }
   }, [erroreCodice]);
 
+  /**
+   * Riporta un fascicolo in errore allo stato bozza, così ricompare
+   * la sezione di invio (con il codice documento già precompilato)
+   * e l'utente può correggere e reinviare.
+   */
+  const handleRiprovaInvio = useCallback(() => {
+    Alert.alert(
+      'Riprova invio',
+      'Il fascicolo tornerà in bozza: potrai correggere i dati e inviarlo di nuovo.',
+      [
+        { text: 'Annulla', style: 'cancel' },
+        {
+          text: 'Riprova',
+          onPress: async () => {
+            try {
+              await aggiorna({ stato: 'bozza' });
+              await refresh();
+            } catch {
+              Toast.show({ type: 'error', text1: 'Impossibile ripristinare il fascicolo' });
+            }
+          },
+        },
+      ]
+    );
+  }, [aggiorna, refresh]);
+
   const handleInvia = useCallback(async () => {
     // Validazione codice documento
     const err = validateCodiceDocumento(codiceDocumento);
@@ -239,7 +291,7 @@ export default function DettaglioFascicoloScreen() {
   if (loadingDettaglio && !fascicolo) {
     return (
       <View style={styles.centrato}>
-        <ActivityIndicator size="large" color="#6366F1" />
+        <ActivityIndicator size="large" color={Colors.primary} />
       </View>
     );
   }
@@ -271,24 +323,37 @@ export default function DettaglioFascicoloScreen() {
   // ─────────────────────────────────────────
 
   return (
+    <KeyboardAvoidingView
+      style={styles.scroll}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+    >
     <ScrollView
+      ref={scrollRef}
       style={styles.scroll}
       contentContainerStyle={[
         styles.content,
-        { paddingBottom: insets.bottom + 32 },
+        { paddingBottom: insets.bottom + 32 + keyboardHeight },
       ]}
+      keyboardShouldPersistTaps="handled"
       refreshControl={
         <RefreshControl
           refreshing={isRefreshing}
           onRefresh={handleRefresh}
-          tintColor="#6366F1"
-          colors={['#6366F1']}
+          tintColor={Colors.primary}
+          colors={[Colors.primary]}
         />
       }
       showsVerticalScrollIndicator={false}
     >
       {/* ── Header fascicolo ── */}
       <View style={styles.header}>
+        <View
+          style={[
+            styles.headerSpine,
+            { backgroundColor: STATO_COLORS[fascicolo.stato].spine },
+          ]}
+        />
         <View style={styles.headerTop}>
           <StatusBadge stato={fascicolo.stato} size="md" />
           <Text style={styles.dataCreazione}>
@@ -306,34 +371,60 @@ export default function DettaglioFascicoloScreen() {
           <Text style={styles.sezioneTitolo}>
             Foto{foto.length > 0 ? ` (${foto.length})` : ''}
           </Text>
-          {isBozza && (
-            <TouchableOpacity
-              style={styles.aggiungiFotoBtn}
-              onPress={handleAggiungiFoto}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.aggiungiFotoBtnText}>+ Aggiungi foto</Text>
-            </TouchableOpacity>
-          )}
+          <View style={styles.sezioneAzioni}>
+            {isBozza && foto.length > 1 && (
+              <TouchableOpacity
+                style={[
+                  styles.riordinaBtn,
+                  riordinoAttivo && styles.riordinaBtnAttivo,
+                ]}
+                onPress={() => setRiordinoAttivo((v) => !v)}
+                activeOpacity={0.75}
+              >
+                <Text
+                  style={[
+                    styles.riordinaBtnText,
+                    riordinoAttivo && styles.riordinaBtnTextAttivo,
+                  ]}
+                >
+                  {riordinoAttivo ? 'Fatto' : 'Riordina'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {isBozza && (
+              <TouchableOpacity
+                style={styles.aggiungiFotoBtn}
+                onPress={handleAggiungiFoto}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.aggiungiFotoBtnText}>+ Aggiungi foto</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {loadingFoto && foto.length === 0 ? (
           <View style={styles.fotoLoading}>
-            <ActivityIndicator size="small" color="#6366F1" />
+            <ActivityIndicator size="small" color={Colors.primary} />
           </View>
         ) : (
           <FotoGrid
             foto={foto}
-            onFotoPress={() => {}}
+            onFotoPress={setFotoAperta}
             onFotoLongPress={handleEliminaFoto}
             onReorder={handleReorder}
+            riordinoAttivo={riordinoAttivo && isBozza}
           />
         )}
 
-        {/* Hint drag-and-drop */}
-        {foto.length > 1 && isBozza && (
+        {/* Hint interazioni foto */}
+        {foto.length > 0 && isBozza && (
           <Text style={styles.hintText}>
-            Tieni premuto una foto per riordinarla
+            {riordinoAttivo
+              ? 'Usa le frecce per spostare le foto, poi tocca "Fatto".'
+              : foto.length > 1
+                ? 'Tieni premuto una foto per eliminarla · "Riordina" per cambiare l\'ordine'
+                : 'Tieni premuto la foto per eliminarla'}
           </Text>
         )}
       </View>
@@ -354,7 +445,7 @@ export default function DettaglioFascicoloScreen() {
           {/* Input codice documento */}
           <View style={styles.codiceContainer}>
             <Text style={styles.codiceLabel}>
-              Codice documento <Text style={styles.obbligatorio}>*</Text>
+              Documento di vendita <Text style={styles.obbligatorio}>*</Text>
             </Text>
             <TextInput
               style={[
@@ -364,7 +455,8 @@ export default function DettaglioFascicoloScreen() {
               ]}
               value={codiceDocumento}
               onChangeText={handleCodiceChange}
-              placeholder="Es. 2024/DOC/001"
+              onFocus={scrollToFocusedInput}
+              placeholder="Es. 2026/DV/000001"
               placeholderTextColor="#9CA3AF"
               autoCapitalize="characters"
               autoCorrect={false}
@@ -419,7 +511,7 @@ export default function DettaglioFascicoloScreen() {
               </Text>
               <LoadingButton
                 label="Riprova invio"
-                onPress={() => {}}
+                onPress={handleRiprovaInvio}
                 variant="secondary"
                 size="md"
                 style={styles.retryButton}
@@ -432,11 +524,55 @@ export default function DettaglioFascicoloScreen() {
       {/* ── Sezione: Codice documento salvato (stato inviato) ── */}
       {fascicolo.stato === 'inviato' && fascicolo.codice_documento && (
         <View style={[styles.sezione, styles.infoSezione]}>
-          <Text style={styles.infoLabel}>Codice documento inviato</Text>
-          <Text style={styles.infoValore}>{fascicolo.codice_documento}</Text>
+          <Text style={styles.infoLabel}>Codice documento</Text>
+          <Text style={styles.infoValore} numberOfLines={1}>
+            {fascicolo.codice_documento}
+          </Text>
         </View>
       )}
     </ScrollView>
+
+    {/* ── Visore foto a tutto schermo ── */}
+    <Modal
+      visible={fotoAperta !== null}
+      transparent={false}
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={() => setFotoAperta(null)}
+    >
+      <View style={visoreStyles.sfondo}>
+        {/* Il tocco sull'immagine chiude, come nelle gallerie di sistema */}
+        <TouchableOpacity
+          style={visoreStyles.area}
+          activeOpacity={1}
+          onPress={() => setFotoAperta(null)}
+        >
+          {fotoAperta && (
+            <Image
+              source={{ uri: fotoAperta.percorso_locale }}
+              style={visoreStyles.immagine}
+              resizeMode="contain"
+            />
+          )}
+        </TouchableOpacity>
+
+        <View style={[visoreStyles.barra, { paddingTop: insets.top + 8 }]}>
+          <Text style={visoreStyles.contatore}>
+            {fotoAperta
+              ? `${foto.findIndex((f) => f.id === fotoAperta.id) + 1} di ${foto.length}`
+              : ''}
+          </Text>
+          <TouchableOpacity
+            onPress={() => setFotoAperta(null)}
+            style={visoreStyles.chiudi}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Text style={visoreStyles.chiudiTesto}>Chiudi</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -447,7 +583,7 @@ export default function DettaglioFascicoloScreen() {
 const styles = StyleSheet.create({
   scroll: {
     flex:            1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Colors.bg,
   },
   content: {
     padding: 16,
@@ -461,16 +597,21 @@ const styles = StyleSheet.create({
   },
   erroreText: {
     fontSize:  15,
-    color:     '#6B7280',
+    color:     Colors.inkMuted,
     textAlign: 'center',
   },
   header: {
-    backgroundColor: '#FFFFFF',
-    borderRadius:    12,
-    padding:         16,
-    borderWidth:     1,
-    borderColor:     '#F3F4F6',
-    gap:             8,
+    ...sectionCard,
+    gap:         8,
+    paddingLeft: 16 + SPINE_WIDTH,
+    overflow:    'hidden',
+  },
+  headerSpine: {
+    position: 'absolute',
+    left:     0,
+    top:      0,
+    bottom:   0,
+    width:    SPINE_WIDTH,
   },
   headerTop: {
     flexDirection:  'row',
@@ -478,21 +619,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   dataCreazione: {
-    fontSize: 12,
-    color:    '#9CA3AF',
+    fontSize:    12,
+    color:       Colors.inkFaint,
+    fontWeight:  '600',
+    fontVariant: ['tabular-nums'],
   },
   descrizione: {
     fontSize:   14,
-    color:      '#6B7280',
+    color:      Colors.inkSoft,
     lineHeight: 20,
   },
   sezione: {
-    backgroundColor: '#FFFFFF',
-    borderRadius:    12,
-    padding:         16,
-    borderWidth:     1,
-    borderColor:     '#F3F4F6',
-    gap:             12,
+    ...sectionCard,
+    gap: 12,
   },
   sezioneHeader: {
     flexDirection:  'row',
@@ -500,22 +639,45 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sezioneTitolo: {
-    fontSize:   15,
-    fontWeight: '600',
-    color:      '#111827',
+    ...overline,
   },
-  aggiungiFotoBtn: {
-    backgroundColor:   '#EEF2FF',
-    borderRadius:      8,
+  sezioneAzioni: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           8,
+  },
+  riordinaBtn: {
+    backgroundColor:   Colors.surface,
+    borderRadius:      Radius.sm,
     paddingHorizontal: 12,
     paddingVertical:   6,
     borderWidth:       1,
-    borderColor:       '#C7D2FE',
+    borderColor:       Colors.hairlineStrong,
+  },
+  riordinaBtnAttivo: {
+    backgroundColor: Colors.primary,
+    borderColor:     Colors.primary,
+  },
+  riordinaBtnText: {
+    fontSize:   13,
+    fontWeight: '700',
+    color:      Colors.inkSoft,
+  },
+  riordinaBtnTextAttivo: {
+    color: '#FFFFFF',
+  },
+  aggiungiFotoBtn: {
+    backgroundColor:   Colors.primaryTint,
+    borderRadius:      Radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical:   6,
+    borderWidth:       1,
+    borderColor:       Colors.primaryBorder,
   },
   aggiungiFotoBtnText: {
     fontSize:   13,
-    fontWeight: '600',
-    color:      '#4F46E5',
+    fontWeight: '700',
+    color:      Colors.primary,
   },
   fotoLoading: {
     paddingVertical: 24,
@@ -523,61 +685,61 @@ const styles = StyleSheet.create({
   },
   hintText: {
     fontSize:  12,
-    color:     '#9CA3AF',
+    color:     Colors.inkFaint,
     textAlign: 'center',
     marginTop: -4,
   },
   avvisoBanner: {
-    backgroundColor: '#FEF3C7',
-    borderRadius:    8,
+    backgroundColor: Colors.warningTint,
+    borderRadius:    Radius.sm,
     padding:         12,
     borderWidth:     1,
-    borderColor:     '#FCD34D',
+    borderColor:     Colors.warningBorder,
   },
   avvisoBannerText: {
     fontSize:   13,
-    color:      '#92400E',
+    color:      Colors.warningText,
     lineHeight: 18,
   },
   codiceContainer: {
     gap: 6,
   },
   codiceLabel: {
-    fontSize:   14,
-    fontWeight: '500',
-    color:      '#374151',
+    ...overline,
+    fontSize:      10.5,
+    letterSpacing: 0.9,
   },
   obbligatorio: {
-    color: '#EF4444',
+    color: Colors.danger,
   },
   codiceInput: {
-    backgroundColor:   '#FFFFFF',
-    borderWidth:       1,
-    borderColor:       '#D1D5DB',
-    borderRadius:      10,
+    backgroundColor:   Colors.surface,
+    borderWidth:       1.5,
+    borderColor:       Colors.hairlineStrong,
+    borderRadius:      Radius.md,
     paddingHorizontal: 14,
-    paddingVertical:   11,
+    paddingVertical:   12,
     fontSize:          15,
-    color:             '#111827',
-    fontWeight:        '500',
+    color:             Colors.ink,
+    fontFamily:        MONO_FONT,
     letterSpacing:     0.5,
   },
   codiceInputError: {
-    borderColor:     '#EF4444',
-    backgroundColor: '#FFF5F5',
+    borderColor:     Colors.danger,
+    backgroundColor: Colors.dangerTint,
   },
   codiceInputDisabled: {
-    backgroundColor: '#F9FAFB',
-    color:           '#9CA3AF',
+    backgroundColor: Colors.surfaceSunken,
+    color:           Colors.inkFaint,
   },
   codiceErrore: {
     fontSize:   12,
-    color:      '#EF4444',
-    fontWeight: '500',
+    color:      Colors.dangerText,
+    fontWeight: '600',
   },
   codiceHelper: {
-    fontSize:  12,
-    color:     '#9CA3AF',
+    fontSize:   12,
+    color:      Colors.inkFaint,
     lineHeight: 16,
   },
   inviaButton: {
@@ -585,17 +747,17 @@ const styles = StyleSheet.create({
   },
   erroreInvioText: {
     fontSize:   13,
-    color:      '#EF4444',
+    color:      Colors.dangerText,
     textAlign:  'center',
     lineHeight: 18,
   },
   retrySect: {
-    gap:       8,
-    marginTop: -4,
+    gap:       10,
+    marginTop: -2,
   },
   retryInfo: {
-    fontSize:  13,
-    color:     '#6B7280',
+    fontSize:   13,
+    color:      Colors.inkMuted,
     lineHeight: 18,
   },
   retryButton: {
@@ -607,19 +769,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   infoLabel: {
-    fontSize: 13,
-    color:    '#6B7280',
+    ...overline,
+    fontSize:      10.5,
+    letterSpacing: 0.9,
+    // Senza flexShrink i due testi non cedono spazio e la riga trabocca:
+    // l'etichetta si accorcia, il codice resta sempre leggibile per intero.
+    flexShrink:    1,
+    marginRight:   12,
   },
   infoValore: {
-    fontSize:   14,
-    fontWeight: '600',
-    color:      '#111827',
+    fontSize:      14,
+    fontWeight:    '700',
+    color:         Colors.ink,
+    fontFamily:    MONO_FONT,
+    letterSpacing: 0.4,
+    flexShrink:    0,
   },
 });
 
 const esitoStyles = StyleSheet.create({
   card: {
-    borderRadius: 10,
+    borderRadius: Radius.md,
     borderWidth:  1,
     overflow:     'hidden',
   },
@@ -633,23 +803,76 @@ const esitoStyles = StyleSheet.create({
     borderBottomColor: 'rgba(0,0,0,0.06)',
   },
   label: {
-    fontSize:   12,
-    fontWeight: '700',
+    fontSize:      11,
+    fontWeight:    '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.9,
   },
   data: {
-    fontSize: 11,
-    color:    '#9CA3AF',
+    fontSize:    11,
+    color:       Colors.inkFaint,
+    fontWeight:  '600',
+    fontVariant: ['tabular-nums'],
   },
   jsonScroll: {
     maxHeight: 200,
   },
   jsonText: {
-    fontFamily:   'monospace',
-    fontSize:     12,
-    color:        '#374151',
-    lineHeight:   18,
-    padding:      12,
+    fontFamily: MONO_FONT,
+    fontSize:   12,
+    color:      Colors.inkSoft,
+    lineHeight: 18,
+    padding:    12,
+  },
+});
+
+// ─────────────────────────────────────────────
+// STILI VISORE FOTO
+// ─────────────────────────────────────────────
+
+const visoreStyles = StyleSheet.create({
+  sfondo: {
+    flex:            1,
+    backgroundColor: '#000000',
+  },
+  area: {
+    flex:           1,
+    justifyContent: 'center',
+    alignItems:     'center',
+  },
+  immagine: {
+    width:  '100%',
+    height: '100%',
+  },
+  // Sovrapposta all'immagine: i tocchi sulla barra non chiudono il visore,
+  // così il pulsante resta cliccabile senza chiusure accidentali
+  barra: {
+    position:        'absolute',
+    top:             0,
+    left:            0,
+    right:           0,
+    flexDirection:   'row',
+    alignItems:      'center',
+    justifyContent:  'space-between',
+    paddingHorizontal: 16,
+    paddingBottom:   12,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  contatore: {
+    color:         '#FFFFFF',
+    fontSize:      13,
+    fontWeight:    '700',
+    letterSpacing: 0.5,
+  },
+  chiudi: {
+    paddingHorizontal: 14,
+    paddingVertical:   7,
+    borderRadius:      Radius.md,
+    backgroundColor:   'rgba(255,255,255,0.16)',
+  },
+  chiudiTesto: {
+    color:      '#FFFFFF',
+    fontSize:   14,
+    fontWeight: '700',
   },
 });

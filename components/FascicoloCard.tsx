@@ -1,8 +1,8 @@
 /**
  * @file components/FascicoloCard.tsx
  * Card per la lista fascicoli con swipe-to-delete.
- * Mostra titolo, descrizione, numero foto, stato e data creazione.
- * Il swipe left rivela un pulsante "Elimina" rosso.
+ * Firma visiva: dorso colorato a sinistra (colore dello stato),
+ * come le etichette delle cartelline d'archivio.
  */
 
 import React, { useCallback } from 'react';
@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { StatusBadge } from './StatusBadge';
-import { CONFIRM_MESSAGES } from '@/constants';
+import { CONFIRM_MESSAGES, STATO_COLORS } from '@/constants';
+import { Colors, Radius, SPINE_WIDTH, cardShadow } from '@/constants/theme';
 import type { FascicoloCardProps } from '@/types';
 
 // ─────────────────────────────────────────────
@@ -23,8 +24,7 @@ import type { FascicoloCardProps } from '@/types';
 // ─────────────────────────────────────────────
 
 /**
- * Formatta una stringa ISO 8601 in formato leggibile italiano.
- * Es. "2024-03-15T14:30:00.000Z" → "15/03/2024"
+ * Formatta una stringa ISO 8601 in data italiana. Es. "15/03/2026"
  */
 function formatData(iso: string): string {
   try {
@@ -43,30 +43,18 @@ function formatData(iso: string): string {
 // COMPONENTE
 // ─────────────────────────────────────────────
 
-/**
- * Card riusabile per la lista fascicoli.
- * Implementa swipe-to-delete con Alert di conferma doppio
- * per i fascicoli già inviati.
- *
- * @example
- * <FascicoloCard
- *   fascicolo={item}
- *   numeroFoto={item.numero_foto}
- *   onPress={() => router.push(`/fascicolo/${item.id}`)}
- *   onDelete={() => handleDelete(item.id)}
- * />
- */
 export function FascicoloCard({
   fascicolo,
   numeroFoto,
   onPress,
   onDelete,
 }: FascicoloCardProps) {
+  const spineColor = STATO_COLORS[fascicolo.stato].spine;
+
   // ── Conferma eliminazione ──
   const handleDeletePress = useCallback(() => {
     const isInviato = fascicolo.stato === 'inviato';
 
-    // Prima conferma — sempre mostrata
     Alert.alert(
       CONFIRM_MESSAGES.ELIMINA_FASCICOLO_BOZZA.title,
       isInviato
@@ -79,7 +67,6 @@ export function FascicoloCard({
           style:   'destructive',
           onPress: isInviato
             ? () => {
-                // Seconda conferma solo per fascicoli inviati
                 Alert.alert(
                   'Conferma finale',
                   'Sei sicuro? Il fascicolo inviato verrà eliminato definitivamente.',
@@ -95,7 +82,7 @@ export function FascicoloCard({
     );
   }, [fascicolo.stato, onDelete]);
 
-  // ── Azione swipe destra (pulsante elimina) ──
+  // ── Azione swipe (pulsante elimina) ──
   const renderRightActions = useCallback(
     () => (
       <TouchableOpacity
@@ -118,34 +105,41 @@ export function FascicoloCard({
       <TouchableOpacity
         style={styles.card}
         onPress={onPress}
-        activeOpacity={0.75}
+        activeOpacity={0.72}
       >
-        {/* Header: titolo + badge stato */}
-        <View style={styles.header}>
-          <Text style={styles.titolo} numberOfLines={1}>
-            {fascicolo.titolo}
-          </Text>
-          <StatusBadge stato={fascicolo.stato} size="sm" />
-        </View>
+        {/* Dorso colorato per stato */}
+        <View style={[styles.spine, { backgroundColor: spineColor }]} />
 
-        {/* Descrizione (opzionale) */}
-        {fascicolo.descrizione ? (
-          <Text style={styles.descrizione} numberOfLines={2}>
-            {fascicolo.descrizione}
-          </Text>
-        ) : null}
+        <View style={styles.body}>
+          {/* Riga titolo + badge stato */}
+          <View style={styles.header}>
+            <Text style={styles.titolo} numberOfLines={1}>
+              {fascicolo.titolo}
+            </Text>
+            <StatusBadge stato={fascicolo.stato} size="sm" />
+          </View>
 
-        {/* Footer: numero foto + data */}
-        <View style={styles.footer}>
-          <View style={styles.fotoChip}>
-            <Text style={styles.fotoChipText}>
+          {/* Descrizione (opzionale) */}
+          {fascicolo.descrizione ? (
+            <Text style={styles.descrizione} numberOfLines={1}>
+              {fascicolo.descrizione}
+            </Text>
+          ) : null}
+
+          {/* Riga meta: numero foto · data */}
+          <View style={styles.meta}>
+            <Text style={styles.metaText}>
               {numeroFoto} {numeroFoto === 1 ? 'foto' : 'foto'}
             </Text>
+            <View style={styles.metaDot} />
+            <Text style={styles.metaText}>
+              {formatData(fascicolo.data_creazione)}
+            </Text>
           </View>
-          <Text style={styles.data}>
-            {formatData(fascicolo.data_creazione)}
-          </Text>
         </View>
+
+        {/* Chevron */}
+        <Text style={styles.chevron}>›</Text>
       </TouchableOpacity>
     </Swipeable>
   );
@@ -157,73 +151,84 @@ export function FascicoloCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
+    flexDirection:    'row',
+    alignItems:       'center',
+    backgroundColor:  Colors.surface,
     marginHorizontal: 16,
-    marginVertical:   6,
-    borderRadius:     12,
-    padding:          16,
+    marginVertical:   5,
+    borderRadius:     Radius.lg - 2,
     borderWidth:      1,
-    borderColor:      '#E5E7EB',
-    // Ombra sottile iOS
-    shadowColor:   '#000',
-    shadowOffset:  { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius:  3,
-    // Elevazione Android
-    elevation: 2,
+    borderColor:      Colors.hairline,
+    overflow:         'hidden',
+    ...cardShadow,
+  },
+  spine: {
+    width:        SPINE_WIDTH,
+    alignSelf:    'stretch',
+  },
+  body: {
+    flex:            1,
+    paddingVertical: 14,
+    paddingLeft:     14,
+    paddingRight:    8,
+    gap:             5,
   },
   header: {
     flexDirection:  'row',
     alignItems:     'center',
     justifyContent: 'space-between',
-    marginBottom:   6,
-    gap:            8,
+    gap:            10,
   },
   titolo: {
-    flex:       1,
-    fontSize:   16,
-    fontWeight: '600',
-    color:      '#111827',
+    flex:          1,
+    fontSize:      16,
+    fontWeight:    '700',
+    letterSpacing: -0.2,
+    color:         Colors.ink,
   },
   descrizione: {
-    fontSize:     13,
-    color:        '#6B7280',
-    lineHeight:   18,
-    marginBottom: 10,
+    fontSize:   13,
+    color:      Colors.inkMuted,
+    lineHeight: 18,
   },
-  footer: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    marginTop:      8,
+  meta: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           7,
+    marginTop:     2,
   },
-  fotoChip: {
-    backgroundColor: '#F3F4F6',
-    borderRadius:    6,
-    paddingHorizontal: 8,
-    paddingVertical:   3,
+  metaText: {
+    fontSize:      12,
+    color:         Colors.inkFaint,
+    fontWeight:    '600',
+    fontVariant:   ['tabular-nums'],
   },
-  fotoChipText: {
-    fontSize:   12,
-    color:      '#374151',
-    fontWeight: '500',
+  metaDot: {
+    width:           3,
+    height:          3,
+    borderRadius:    2,
+    backgroundColor: Colors.hairlineStrong,
   },
-  data: {
-    fontSize: 12,
-    color:    '#9CA3AF',
+  chevron: {
+    fontSize:     26,
+    color:        Colors.inkFaint,
+    fontWeight:   '300',
+    paddingRight: 14,
+    marginTop:    -2,
   },
   deleteAction: {
-    backgroundColor: '#EF4444',
+    backgroundColor: '#D92D20',
     justifyContent:  'center',
     alignItems:      'center',
     width:           88,
-    marginVertical:  6,
+    marginVertical:  5,
     marginRight:     16,
-    borderRadius:    12,
+    borderRadius:    Radius.lg - 2,
   },
   deleteActionText: {
-    color:      '#FFFFFF',
-    fontWeight: '600',
-    fontSize:   14,
+    color:         '#FFFFFF',
+    fontWeight:    '700',
+    fontSize:      13,
+    letterSpacing: 0.3,
   },
 });

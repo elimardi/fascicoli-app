@@ -13,8 +13,6 @@ import {
   creaFascicolo,
   aggiornFascicolo,
   eliminaFascicolo,
-  segnaFascicoloInviato,
-  segnaFascicoloErrore,
   type FascicoloConFoto,
 } from '@/services/fascicoli.service';
 import {
@@ -22,7 +20,7 @@ import {
   aggiungiFoto,
   eliminaFoto,
   aggiornOrdinamento,
-  eliminaFileFotoDiFascicolo,
+  eliminaDirectoryFascicolo,
 } from '@/services/foto.service';
 import { inviaFascicolo } from '@/services/webservice.service';
 import type {
@@ -189,7 +187,7 @@ export const useFascicoliStore = create<FascicoliState>((set, get) => ({
    */
   eliminaFascicolo: async (id: number) => {
     // 1. Elimina file fisici (directory intera del fascicolo)
-    await eliminaFileFotoDiFascicolo(id);
+    await eliminaDirectoryFascicolo(id);
     // 2. Elimina record DB (CASCADE sulle foto)
     await eliminaFascicolo(id);
     // 3. Aggiorna store

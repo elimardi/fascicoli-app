@@ -1,21 +1,15 @@
 /**
  * @file components/StatusBadge.tsx
- * Badge colorato per la visualizzazione dello stato di un fascicolo.
- * Supporta due dimensioni: 'sm' (liste) e 'md' (dettaglio header).
+ * Pill di stato del fascicolo in stile "etichetta d'archivio":
+ * maiuscoletto spaziato, tinta piena tenue, puntino colorato.
  */
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { STATO_COLORS } from '@/constants';
+import { Radius } from '@/constants/theme';
 import type { StatusBadgeProps } from '@/types';
 
-/**
- * Mostra un pill colorato con l'etichetta dello stato del fascicolo.
- *
- * @example
- * <StatusBadge stato="bozza" size="sm" />
- * <StatusBadge stato="inviato" size="md" />
- */
 export function StatusBadge({ stato, size = 'sm' }: StatusBadgeProps) {
   const colors = STATO_COLORS[stato];
   const isMd   = size === 'md';
@@ -25,9 +19,8 @@ export function StatusBadge({ stato, size = 'sm' }: StatusBadgeProps) {
       style={[
         styles.badge,
         {
-          backgroundColor: colors.bg,
-          borderColor:     colors.border,
-          paddingHorizontal: isMd ? 12 : 8,
+          backgroundColor:   colors.bg,
+          paddingHorizontal: isMd ? 12 : 9,
           paddingVertical:   isMd ? 5  : 3,
         },
       ]}
@@ -38,7 +31,7 @@ export function StatusBadge({ stato, size = 'sm' }: StatusBadgeProps) {
           styles.label,
           {
             color:    colors.text,
-            fontSize: isMd ? 13 : 11,
+            fontSize: isMd ? 11.5 : 10.5,
           },
         ]}
       >
@@ -50,12 +43,11 @@ export function StatusBadge({ stato, size = 'sm' }: StatusBadgeProps) {
 
 const styles = StyleSheet.create({
   badge: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    borderRadius:   20,
-    borderWidth:    1,
-    alignSelf:      'flex-start',
-    gap:            5,
+    flexDirection: 'row',
+    alignItems:    'center',
+    borderRadius:  Radius.pill,
+    alignSelf:     'flex-start',
+    gap:           5,
   },
   dot: {
     width:        6,
@@ -63,7 +55,8 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   label: {
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontWeight:    '700',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
   },
 });

@@ -57,11 +57,44 @@ export interface Foto {
 export interface ConfigWebservice {
   id: number;
   base_url: string;
-  auth_token: string;
+  /** Therm token usato per richiedere l'access token OAuth */
+  therm_token: string;
+  /** Path relativo dell'endpoint di autenticazione (es. authenticate/oauth/token) */
+  auth_endpoint: string;
+  /** Path relativo dell'endpoint di invio documenti (es. YUploadDocDgtMultipli) */
+  invio_endpoint: string;
+  /** Nome della società mostrato nell'header dell'app */
+  nome_societa: string;
+  /** Logo della società in base64 (data URI escluso, solo payload) */
+  logo_base64: string;
+  /** Descrizione applicata alle foto inviate — max 25 caratteri */
+  descrizione_foto: string;
+  /** Catalogo di destinazione delle foto inviate — max 50 caratteri */
+  catalogo_foto: string;
   /** Timeout in millisecondi per le richieste HTTP */
   timeout_ms: number;
   created_at: string; // ISO 8601
   updated_at: string; // ISO 8601
+}
+
+/**
+ * Cache del token OAuth ottenuto dall'endpoint di autenticazione.
+ * Persistita in DB per sopravvivere ai riavvii dell'app.
+ */
+export interface TokenCache {
+  access_token: string;
+  /** Istante di scadenza in epoch millisecondi */
+  expires_at: number;
+}
+
+/**
+ * Risposta dell'endpoint di autenticazione OAuth.
+ */
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  /** Validità del token in secondi */
+  expires_in: number;
 }
 
 // ─────────────────────────────────────────────
@@ -105,7 +138,13 @@ export interface CreaFotoDTO {
  */
 export interface ConfigWebserviceDTO {
   base_url: string;
-  auth_token: string;
+  therm_token: string;
+  auth_endpoint: string;
+  invio_endpoint: string;
+  nome_societa: string;
+  logo_base64: string;
+  descrizione_foto: string;
+  catalogo_foto: string;
   timeout_ms: number;
 }
 
@@ -241,7 +280,15 @@ export interface FotoRow {
 export interface ConfigRow {
   id: number;
   base_url: string;
-  auth_token: string;
+  therm_token: string;
+  auth_endpoint: string;
+  invio_endpoint: string;
+  nome_societa: string;
+  logo_base64: string;
+  descrizione_foto: string;
+  catalogo_foto: string;
+  cached_access_token: string | null;
+  token_expires_at: number | null;
   timeout_ms: number;
   created_at: string;
   updated_at: string;
@@ -277,4 +324,6 @@ export interface FotoGridProps {
   onFotoPress: (foto: Foto) => void;
   onFotoLongPress: (foto: Foto) => void;
   onReorder: (fotosRiordinate: Foto[]) => void;
+  /** Se true mostra i controlli di riordino (frecce) su ogni cella */
+  riordinoAttivo?: boolean;
 }

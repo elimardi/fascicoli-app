@@ -54,7 +54,7 @@ interface ConfigState {
 // STORE
 // ─────────────────────────────────────────────
 
-export const useConfigStore = create<ConfigState>((set, get) => ({
+export const useConfigStore = create<ConfigState>((set) => ({
   // ── Stato iniziale ──
   config:        null,
   isConfigured:  false,

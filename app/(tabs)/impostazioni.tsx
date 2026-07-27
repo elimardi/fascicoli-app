@@ -2,27 +2,43 @@
  * @file app/(tabs)/impostazioni.tsx
  * Schermata Impostazioni — configurazione del webservice esterno.
  * Features:
- * - Form con URL base, token autenticazione, timeout
+ * - Branding: nome società e logo (mostrati nell'header dell'app)
+ * - Form con URL base, therm token, endpoint auth e invio, timeout
  * - Validazione in tempo reale per campo
- * - Pulsante "Test connessione" con badge latenza
+ * - Pulsante "Test connessione" (autenticazione OAuth reale) con badge latenza
  * - Salvataggio con feedback toast
  * - Indicatore stato connessione (verde/rosso/grigio)
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   StyleSheet,
-  Switch,
+  TouchableOpacity,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { useConfig } from '@/hooks/useConfig';
+import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
 import { FormField, LoadingButton } from '@/components';
-import { TOAST_MESSAGES, WS_DEFAULT_TIMEOUT_MS } from '@/constants';
+import {
+  leggiInfoVersione,
+  updateIdBreve,
+  controllaEScarica,
+  riavviaConNuovaVersione,
+} from '@/services/updates.service';
+import {
+  TOAST_MESSAGES,
+  DESCRIZIONE_FOTO_MAX_LEN,
+  CATALOGO_FOTO_MAX_LEN,
+} from '@/constants';
+import { Colors, Radius, overline, sectionCard } from '@/constants/theme';
 
 // ─────────────────────────────────────────────
 // SOTTO-COMPONENTI
@@ -38,8 +54,8 @@ interface ConnessioneBadgeProps {
  * Badge colorato che mostra lo stato dell'ultima connessione testata.
  */
 function ConnessioneBadge({ success, latenza, messaggio }: ConnessioneBadgeProps) {
-  const color = success === null ? '#9CA3AF' : success ? '#10B981' : '#EF4444';
-  const bg    = success === null ? '#F3F4F6' : success ? '#D1FAE5' : '#FEE2E2';
+  const color = success === null ? '#9CA3AF' : success ? Colors.success : Colors.danger;
+  const bg    = success === null ? '#F3F4F6' : success ? Colors.successBorder : Colors.dangerBorder;
   const border = success === null ? '#E5E7EB' : success ? '#6EE7B7' : '#FCA5A5';
 
   return (
@@ -63,6 +79,63 @@ function ConnessioneBadge({ success, latenza, messaggio }: ConnessioneBadgeProps
 
 export default function ImpostazioniScreen() {
   const insets = useSafeAreaInsets();
+  const { scrollRef, keyboardHeight, scrollToFocusedInput } = useKeyboardScroll();
+
+  // ── Aggiornamenti OTA ──
+  // Le costanti native non cambiano durante la sessione: si leggono una volta
+  const infoVersione = useMemo(() => leggiInfoVersione(), []);
+  const [isControllandoUpdate, setIsControllandoUpdate] = useState(false);
+
+  const handleControllaUpdate = useCallback(async () => {
+    setIsControllandoUpdate(true);
+    const esito = await controllaEScarica();
+    setIsControllandoUpdate(false);
+
+    switch (esito.tipo) {
+      case 'scaricato':
+        Alert.alert(
+          'Aggiornamento pronto',
+          'È stata scaricata una nuova versione. Vuoi riavviare l\'app per applicarla?',
+          [
+            { text: 'Più tardi', style: 'cancel' },
+            {
+              text:    'Riavvia',
+              onPress: () => {
+                // Dopo reloadAsync non è sicuro eseguire altro codice
+                riavviaConNuovaVersione().catch(() =>
+                  Toast.show({
+                    type:  'error',
+                    text1: 'Riavvio non riuscito',
+                    text2: 'Chiudi e riapri l\'app manualmente.',
+                  })
+                );
+              },
+            },
+          ]
+        );
+        break;
+
+      case 'aggiornato':
+        Toast.show({ type: 'info', text1: 'Sei già alla versione più recente' });
+        break;
+
+      case 'disattivato':
+        Toast.show({
+          type:  'info',
+          text1: 'Aggiornamenti non disponibili',
+          text2: 'Funziona solo nell\'app installata.',
+        });
+        break;
+
+      case 'errore':
+        Toast.show({
+          type:  'error',
+          text1: 'Controllo non riuscito',
+          text2: esito.messaggio,
+        });
+        break;
+    }
+  }, []);
 
   const {
     formValues,
@@ -73,6 +146,8 @@ export default function ImpostazioniScreen() {
     testResult,
     isConfigured,
     setField,
+    scegliLogo,
+    rimuoviLogo,
     salva,
     elimina,
     eseguiTest,
@@ -128,11 +203,17 @@ export default function ImpostazioniScreen() {
   // ─────────────────────────────────────────
 
   return (
+    <KeyboardAvoidingView
+      style={styles.scroll}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+    >
     <ScrollView
+      ref={scrollRef}
       style={styles.scroll}
       contentContainerStyle={[
         styles.content,
-        { paddingBottom: insets.bottom + 32 },
+        { paddingBottom: insets.bottom + 32 + keyboardHeight },
       ]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
@@ -144,16 +225,68 @@ export default function ImpostazioniScreen() {
             <Text style={styles.statoLabel}>Webservice</Text>
             <Text style={[
               styles.statoValore,
-              { color: isConfigured ? '#10B981' : '#9CA3AF' },
+              { color: isConfigured ? Colors.success : '#9CA3AF' },
             ]}>
               {isConfigured ? 'Configurato' : 'Non configurato'}
             </Text>
           </View>
           <View style={[
             styles.statoDot,
-            { backgroundColor: isConfigured ? '#10B981' : '#D1D5DB' },
+            { backgroundColor: isConfigured ? Colors.success : '#D1D5DB' },
           ]} />
         </View>
+      </View>
+
+      {/* ── Sezione: Società (branding) ── */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Società</Text>
+
+        <FormField
+          onFocus={scrollToFocusedInput}
+          label="Nome società"
+          value={formValues.nome_societa}
+          onChangeText={(v) => setField('nome_societa', v)}
+          error={fieldErrors.nome_societa}
+          helper="Mostrato nell'intestazione dell'app"
+          autoCorrect={false}
+          returnKeyType="next"
+          placeholder="Es. Rossi S.r.l."
+        />
+
+        <View style={logoStyles.row}>
+          <View style={logoStyles.previewBox}>
+            {formValues.logo_base64 ? (
+              <Image
+                source={{ uri: `data:image/png;base64,${formValues.logo_base64}` }}
+                style={logoStyles.preview}
+                resizeMode="contain"
+              />
+            ) : (
+              <Text style={logoStyles.previewPlaceholder}>Nessun{'\n'}logo</Text>
+            )}
+          </View>
+
+          <View style={logoStyles.actions}>
+            <TouchableOpacity style={logoStyles.actionButton} onPress={scegliLogo}>
+              <Text style={logoStyles.actionText}>
+                {formValues.logo_base64 ? 'Cambia logo' : 'Scegli logo'}
+              </Text>
+            </TouchableOpacity>
+            {formValues.logo_base64 ? (
+              <TouchableOpacity
+                style={[logoStyles.actionButton, logoStyles.actionButtonDanger]}
+                onPress={rimuoviLogo}
+              >
+                <Text style={[logoStyles.actionText, logoStyles.actionTextDanger]}>
+                  Rimuovi
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+        {fieldErrors.logo_base64 ? (
+          <Text style={styles.errorText}>{fieldErrors.logo_base64}</Text>
+        ) : null}
       </View>
 
       {/* ── Sezione: Form configurazione ── */}
@@ -161,12 +294,13 @@ export default function ImpostazioniScreen() {
         <Text style={styles.sectionTitle}>Connessione</Text>
 
         <FormField
+          onFocus={scrollToFocusedInput}
           label="URL base"
           required
           value={formValues.base_url}
           onChangeText={(v) => setField('base_url', v)}
           error={fieldErrors.base_url}
-          helper="Es. https://gestionale.esempio.com/api"
+          helper="Es. http://10.0.0.10:10101/panth01/api"
           keyboardType="url"
           autoCapitalize="none"
           autoCorrect={false}
@@ -175,17 +309,81 @@ export default function ImpostazioniScreen() {
         />
 
         <FormField
-          label="Token di autenticazione"
+          onFocus={scrollToFocusedInput}
+          label="Therm token"
           required
-          value={formValues.auth_token}
-          onChangeText={(v) => setField('auth_token', v)}
-          error={fieldErrors.auth_token}
-          helper="Token Bearer per l'autenticazione alle API"
+          value={formValues.therm_token}
+          onChangeText={(v) => setField('therm_token', v)}
+          error={fieldErrors.therm_token}
+          helper="Usato per richiedere l'access token OAuth"
           autoCapitalize="none"
           autoCorrect={false}
           secureTextEntry={false}
           multiline={false}
-          placeholder="eyJ..."
+          placeholder="xxxxxxxxxx"
+        />
+      </View>
+
+      {/* ── Sezione: Endpoint ── */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Endpoint</Text>
+
+        <FormField
+          onFocus={scrollToFocusedInput}
+          label="Endpoint autenticazione"
+          required
+          value={formValues.auth_endpoint}
+          onChangeText={(v) => setField('auth_endpoint', v)}
+          error={fieldErrors.auth_endpoint}
+          helper="Path relativo all'URL base — POST { therm_token, grant_type }"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="next"
+          placeholder="authenticate/oauth/token"
+        />
+
+        <FormField
+          onFocus={scrollToFocusedInput}
+          label="Endpoint invio documenti"
+          required
+          value={formValues.invio_endpoint}
+          onChangeText={(v) => setField('invio_endpoint', v)}
+          error={fieldErrors.invio_endpoint}
+          helper="Path relativo all'URL base — PUT con Bearer token"
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="YUploadDocDgtMultipli"
+        />
+      </View>
+
+      {/* ── Sezione: Attributi foto ── */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Attributi foto</Text>
+
+        <FormField
+          onFocus={scrollToFocusedInput}
+          label="Descrizione foto"
+          value={formValues.descrizione_foto}
+          onChangeText={(v) => setField('descrizione_foto', v)}
+          error={fieldErrors.descrizione_foto}
+          helper={`Allegata a ogni foto inviata — max ${DESCRIZIONE_FOTO_MAX_LEN} caratteri`}
+          maxLength={DESCRIZIONE_FOTO_MAX_LEN}
+          autoCorrect={false}
+          returnKeyType="next"
+          placeholder="Es. Foto sopralluogo"
+        />
+
+        <FormField
+          onFocus={scrollToFocusedInput}
+          label="Catalogo foto"
+          value={formValues.catalogo_foto}
+          onChangeText={(v) => setField('catalogo_foto', v)}
+          error={fieldErrors.catalogo_foto}
+          helper={`Catalogo di destinazione nel gestionale — max ${CATALOGO_FOTO_MAX_LEN} caratteri`}
+          maxLength={CATALOGO_FOTO_MAX_LEN}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Es. DOCUMENTI_VENDITA"
         />
       </View>
 
@@ -267,6 +465,51 @@ export default function ImpostazioniScreen() {
         )}
       </View>
 
+      {/* ── Sezione: Aggiornamenti ── */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Aggiornamenti</Text>
+
+        <View style={styles.updateRiga}>
+          <Text style={styles.updateLabel}>Versione</Text>
+          <Text style={styles.updateValore}>{infoVersione.versioneApp}</Text>
+        </View>
+
+        <View style={styles.updateRiga}>
+          <Text style={styles.updateLabel}>Origine</Text>
+          <Text style={styles.updateValore}>
+            {!infoVersione.attivo
+              ? 'Sviluppo'
+              : infoVersione.daBuild
+                ? 'Build installato'
+                : `Aggiornamento ${updateIdBreve(infoVersione.updateId)}`}
+          </Text>
+        </View>
+
+        {infoVersione.attivo && infoVersione.canale && (
+          <View style={styles.updateRiga}>
+            <Text style={styles.updateLabel}>Canale</Text>
+            <Text style={styles.updateValore}>{infoVersione.canale}</Text>
+          </View>
+        )}
+
+        {infoVersione.attivo ? (
+          <LoadingButton
+            label="Cerca aggiornamenti"
+            loadingLabel="Controllo in corso..."
+            onPress={handleControllaUpdate}
+            loading={isControllandoUpdate}
+            variant="secondary"
+            size="md"
+            style={styles.updateButton}
+          />
+        ) : (
+          <Text style={styles.updateNota}>
+            Gli aggiornamenti sono disponibili solo nell'app installata.
+            In Expo Go il codice arriva sempre dal server di sviluppo.
+          </Text>
+        )}
+      </View>
+
       {/* ── Footer informativo ── */}
       <View style={styles.footer}>
         <Text style={styles.footerText}>
@@ -275,6 +518,7 @@ export default function ImpostazioniScreen() {
         </Text>
       </View>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -285,26 +529,18 @@ export default function ImpostazioniScreen() {
 const styles = StyleSheet.create({
   scroll: {
     flex:            1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Colors.bg,
   },
   content: {
     paddingTop: 16,
     gap:        12,
   },
   section: {
-    backgroundColor: '#FFFFFF',
+    ...sectionCard,
     marginHorizontal: 16,
-    borderRadius:    12,
-    padding:         16,
-    borderWidth:     1,
-    borderColor:     '#F3F4F6',
   },
   sectionTitle: {
-    fontSize:     13,
-    fontWeight:   '600',
-    color:        '#6B7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...overline,
     marginBottom: 14,
   },
   statoRow: {
@@ -316,8 +552,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statoLabel: {
-    fontSize:   13,
-    color:      '#6B7280',
+    fontSize: 13,
+    color:    Colors.inkMuted,
   },
   statoValore: {
     fontSize:   16,
@@ -338,13 +574,14 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   timeoutLabel: {
-    fontSize: 14,
-    color:    '#374151',
-    fontWeight: '500',
+    fontSize:   14,
+    color:      Colors.inkSoft,
+    fontWeight: '600',
   },
   timeoutValore: {
-    fontSize: 13,
-    color:    '#6B7280',
+    fontSize:    13,
+    color:       Colors.inkMuted,
+    fontVariant: ['tabular-nums'],
   },
   presetRow: {
     flexDirection: 'row',
@@ -354,9 +591,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   errorText: {
-    marginTop: 6,
-    fontSize:  12,
-    color:     '#EF4444',
+    marginTop:  6,
+    fontSize:   12,
+    fontWeight: '600',
+    color:      Colors.dangerText,
   },
   testButton: {
     marginTop: 12,
@@ -371,15 +609,95 @@ const styles = StyleSheet.create({
   eliminaButton: {
     width: '100%',
   },
+  updateRiga: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    marginBottom:   10,
+  },
+  updateLabel: {
+    fontSize:   14,
+    color:      Colors.inkMuted,
+    flexShrink: 1,
+    marginRight: 12,
+  },
+  updateValore: {
+    fontSize:   14,
+    fontWeight: '600',
+    color:      Colors.ink,
+    flexShrink: 0,
+  },
+  updateButton: {
+    marginTop: 6,
+  },
+  updateNota: {
+    fontSize:   13,
+    lineHeight: 19,
+    color:      Colors.inkMuted,
+  },
   footer: {
     marginHorizontal: 16,
     marginTop:        4,
   },
   footerText: {
-    fontSize:  12,
-    color:     '#9CA3AF',
-    textAlign: 'center',
+    fontSize:   12,
+    color:      Colors.inkFaint,
+    textAlign:  'center',
     lineHeight: 18,
+  },
+});
+
+const logoStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           14,
+    marginTop:     4,
+  },
+  previewBox: {
+    width:           76,
+    height:          76,
+    borderRadius:    Radius.lg,
+    borderWidth:     1,
+    borderColor:     Colors.hairline,
+    backgroundColor: Colors.surfaceSunken,
+    alignItems:      'center',
+    justifyContent:  'center',
+    overflow:        'hidden',
+  },
+  preview: {
+    width:  '100%',
+    height: '100%',
+  },
+  previewPlaceholder: {
+    ...overline,
+    fontSize:  9.5,
+    textAlign: 'center',
+    color:     Colors.inkFaint,
+  },
+  actions: {
+    flex: 1,
+    gap:  8,
+  },
+  actionButton: {
+    borderWidth:     1,
+    borderColor:     Colors.primaryBorder,
+    backgroundColor: Colors.primaryTint,
+    borderRadius:    Radius.sm,
+    paddingVertical: 10,
+    alignItems:      'center',
+  },
+  actionButtonDanger: {
+    borderColor:     Colors.dangerBorder,
+    backgroundColor: Colors.dangerTint,
+  },
+  actionText: {
+    fontSize:   14,
+    fontWeight: '700',
+    color:      Colors.primary,
+  },
+  actionTextDanger: {
+    color: Colors.dangerText,
   },
 });
 
@@ -406,11 +724,12 @@ const badgeStyles = StyleSheet.create({
   },
   messaggio: {
     fontSize:   13,
-    fontWeight: '500',
+    fontWeight: '600',
     lineHeight: 18,
   },
   latenza: {
-    fontSize: 12,
-    color:    '#6B7280',
+    fontSize:    12,
+    color:       Colors.inkMuted,
+    fontVariant: ['tabular-nums'],
   },
 });

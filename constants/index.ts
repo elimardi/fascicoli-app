@@ -8,7 +8,25 @@
 export const DB_NAME = 'fascicoli.db';
 
 /** Versione corrente dello schema DB (incrementare ad ogni migration) */
-export const DB_VERSION = 1;
+export const DB_VERSION = 4;
+
+/** Lunghezza massima del campo "Descrizione foto" — varchar(25) */
+export const DESCRIZIONE_FOTO_MAX_LEN = 25;
+
+/** Lunghezza massima del campo "Catalogo foto" — varchar(50) */
+export const CATALOGO_FOTO_MAX_LEN = 50;
+
+/** Path relativo di default per l'endpoint di autenticazione OAuth */
+export const WS_DEFAULT_AUTH_ENDPOINT = 'authenticate/oauth/token';
+
+/** Path relativo di default per l'endpoint di invio documenti digitali */
+export const WS_DEFAULT_INVIO_ENDPOINT = 'YUploadDocDgtMultipli';
+
+/** Margine di sicurezza (ms) prima della scadenza del token per il refresh */
+export const TOKEN_EXPIRY_MARGIN_MS = 60_000;
+
+/** Dimensione massima lato lungo del logo società (px) */
+export const LOGO_MAX_SIZE = 256;
 
 /** Directory permanente per le foto dei fascicoli (expo-file-system) */
 export const FOTO_DIRECTORY = 'fascicoli_foto';
@@ -28,25 +46,28 @@ export const MAX_FOTO_PER_FASCICOLO = 50;
 /** Colori semantici per i tre stati fascicolo */
 export const STATO_COLORS: Record<
   'bozza' | 'inviato' | 'errore',
-  { bg: string; text: string; border: string; label: string }
+  { bg: string; text: string; border: string; spine: string; label: string }
 > = {
   bozza: {
-    bg: '#FEF3C7',
-    text: '#92400E',
-    border: '#F59E0B',
-    label: 'Bozza',
+    bg:     '#EEF1F6',
+    text:   '#3E4C63',
+    border: '#8A97AD',
+    spine:  '#8A97AD',
+    label:  'Bozza',
   },
   inviato: {
-    bg: '#D1FAE5',
-    text: '#065F46',
-    border: '#10B981',
-    label: 'Inviato',
+    bg:     '#ECFDF3',
+    text:   '#067647',
+    border: '#17B26A',
+    spine:  '#17B26A',
+    label:  'Inviato',
   },
   errore: {
-    bg: '#FEE2E2',
-    text: '#991B1B',
-    border: '#EF4444',
-    label: 'Errore',
+    bg:     '#FEF3F2',
+    text:   '#B42318',
+    border: '#F04438',
+    spine:  '#F04438',
+    label:  'Errore',
   },
 };
 
@@ -54,7 +75,7 @@ export const STATO_COLORS: Record<
 export const TOAST_MESSAGES = {
   FASCICOLO_CREATO: 'Fascicolo creato con successo',
   FASCICOLO_ELIMINATO: 'Fascicolo eliminato',
-  FASCICOLO_INVIATO: 'Fascicolo inviato al gestionale',
+  FASCICOLO_INVIATO: 'Fascicolo inviato',
   FOTO_AGGIUNTA: 'Foto aggiunta al fascicolo',
   FOTO_ELIMINATA: 'Foto eliminata',
   FOTO_RIORDINATE: 'Ordine foto aggiornato',

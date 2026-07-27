@@ -1,10 +1,10 @@
 /**
  * @file components/FormField.tsx
- * Campo form riusabile con label, TextInput, messaggio di errore
- * e testo helper. Supporta tutte le varianti TextInput di React Native.
+ * Campo di input riusabile con etichetta in maiuscoletto, stato di
+ * focus evidenziato (bordo accento), errore e testo di aiuto.
  */
 
-import React from 'react';
+import React, { useState, forwardRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
+import { Colors, Radius, overline } from '@/constants/theme';
 
 // ─────────────────────────────────────────────
 // TIPI
@@ -25,7 +26,7 @@ interface FormFieldProps extends TextInputProps {
   error?: string;
   /** Testo helper sotto il campo (grigio) */
   helper?: string;
-  /** Campo obbligatorio — mostra asterisco rosso */
+  /** Campo obbligatorio — mostra asterisco */
   required?: boolean;
   /** Stile aggiuntivo per il container esterno */
   containerStyle?: ViewStyle;
@@ -35,32 +36,22 @@ interface FormFieldProps extends TextInputProps {
 // COMPONENTE
 // ─────────────────────────────────────────────
 
-/**
- * Campo form con label, TextInput, gestione errori e testo helper.
- * Eredita tutte le props di TextInput per massima flessibilità.
- *
- * @example
- * <FormField
- *   label="URL base"
- *   required
- *   value={formValues.base_url}
- *   onChangeText={(v) => setField('base_url', v)}
- *   error={fieldErrors.base_url}
- *   helper="Es. https://gestionale.esempio.com/api"
- *   keyboardType="url"
- *   autoCapitalize="none"
- * />
- */
-export function FormField({
-  label,
-  error,
-  helper,
-  required,
-  containerStyle,
-  style,
-  ...textInputProps
-}: FormFieldProps) {
+export const FormField = forwardRef<TextInput, FormFieldProps>(function FormField(
+  {
+    label,
+    error,
+    helper,
+    required,
+    containerStyle,
+    style,
+    onFocus,
+    onBlur,
+    ...textInputProps
+  },
+  ref
+) {
   const hasError = Boolean(error);
+  const [isFocused, setIsFocused] = useState(false);
 
   return (
     <View style={[styles.container, containerStyle]}>
@@ -72,13 +63,23 @@ export function FormField({
 
       {/* Input */}
       <TextInput
+        ref={ref}
         style={[
           styles.input,
+          isFocused && styles.inputFocused,
           hasError && styles.inputError,
           textInputProps.multiline && styles.inputMultiline,
           style,
         ]}
-        placeholderTextColor="#9CA3AF"
+        placeholderTextColor={Colors.inkFaint}
+        onFocus={(e) => {
+          setIsFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setIsFocused(false);
+          onBlur?.(e);
+        }}
         {...textInputProps}
       />
 
@@ -90,7 +91,7 @@ export function FormField({
       ) : null}
     </View>
   );
-}
+});
 
 // ─────────────────────────────────────────────
 // STILI
@@ -103,47 +104,50 @@ const styles = StyleSheet.create({
   labelRow: {
     flexDirection: 'row',
     alignItems:    'center',
-    marginBottom:  6,
+    marginBottom:  7,
   },
   label: {
-    fontSize:   14,
-    fontWeight: '500',
-    color:      '#374151',
+    ...overline,
+    fontSize:      10.5,
+    letterSpacing: 0.9,
   },
   asterisco: {
-    fontSize: 14,
-    color:    '#EF4444',
-    fontWeight: '600',
+    fontSize:   12,
+    color:      Colors.danger,
+    fontWeight: '700',
   },
   input: {
-    backgroundColor: '#FFFFFF',
-    borderWidth:     1,
-    borderColor:     '#D1D5DB',
-    borderRadius:    10,
+    backgroundColor:   Colors.surface,
+    borderWidth:       1.5,
+    borderColor:       Colors.hairlineStrong,
+    borderRadius:      Radius.md,
     paddingHorizontal: 14,
-    paddingVertical:   11,
-    fontSize:        15,
-    color:           '#111827',
+    paddingVertical:   12,
+    fontSize:          15,
+    color:             Colors.ink,
+  },
+  inputFocused: {
+    borderColor: Colors.primary,
   },
   inputError: {
-    borderColor:     '#EF4444',
-    backgroundColor: '#FFF5F5',
+    borderColor:     Colors.danger,
+    backgroundColor: Colors.dangerTint,
   },
   inputMultiline: {
-    minHeight:  100,
+    minHeight:         100,
     textAlignVertical: 'top',
-    paddingTop: 12,
+    paddingTop:        12,
   },
   errorText: {
-    marginTop: 5,
-    fontSize:  12,
-    color:     '#EF4444',
-    fontWeight: '500',
+    marginTop:  6,
+    fontSize:   12,
+    color:      Colors.dangerText,
+    fontWeight: '600',
   },
   helperText: {
-    marginTop: 5,
-    fontSize:  12,
-    color:     '#9CA3AF',
+    marginTop:  6,
+    fontSize:   12,
+    color:      Colors.inkFaint,
     lineHeight: 16,
   },
 });

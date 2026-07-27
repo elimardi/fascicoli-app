@@ -1,17 +1,9 @@
 /**
  * @file app/fascicolo/[id]/camera.tsx
- * Schermata fotocamera in-app — si apre come fullScreenModal.
- * Features:
- * - Preview camera live con expo-camera
- * - Pulsante scatto centrale
- * - Pulsante libreria (image picker) in basso a sinistra
- * - Flip camera (frontale/posteriore)
- * - Preview post-scatto con conferma / riprova / annulla
- * - Salvataggio foto nel fascicolo tramite useFascicolo
- * - Gestione permessi con fallback UI
+ * Versione stabile con flash funzionante (usa enableTorch)
  */
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -19,117 +11,352 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  ScrollView,
+  Alert,
   Dimensions,
-  Platform,
 } from 'react-native';
-import { Camera, CameraType, FlashMode } from 'expo-camera';
+import { CameraView, useCameraPermissions, CameraType } from 'expo-camera';
+import Svg, { Path, Rect, Circle } from 'react-native-svg';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
-import { useCamera, type FotoScattata } from '@/hooks/useCamera';
 import { useFascicoliStore } from '@/store/fascicoli.store';
-import { TOAST_MESSAGES } from '@/constants';
+
+// ── Dimensioni anteprima: proporzionali allo schermo, sempre centrate ──
+const SCREEN_W  = Dimensions.get('window').width;
+const PREVIEW_W = SCREEN_W - 88;                       // lascia intravedere la foto successiva
+const PREVIEW_H = Math.round(PREVIEW_W * 1.32);
+const PREVIEW_GAP = 16;
+const PREVIEW_SIDE_PAD = (SCREEN_W - PREVIEW_W) / 2;   // centra la prima e l'ultima foto
 
 // ─────────────────────────────────────────────
-// COSTANTI
+// ICONE VETTORIALI (stile coerente con l'app)
 // ─────────────────────────────────────────────
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+interface IconProps {
+  size?: number;
+  color?: string;
+}
 
-// ─────────────────────────────────────────────
-// SOTTO-COMPONENTI
-// ─────────────────────────────────────────────
-
-/**
- * Schermata mostrata quando il permesso camera è negato.
- */
-function PermessoNegato({
-  onRichiedi,
-  onChiudi,
-}: {
-  onRichiedi: () => void;
-  onChiudi:   () => void;
-}) {
+/** X di chiusura */
+function IconChiudi({ size = 22, color = '#FFFFFF' }: IconProps) {
   return (
-    <View style={permStyles.container}>
-      <Text style={permStyles.icon}>📷</Text>
-      <Text style={permStyles.titolo}>Accesso fotocamera negato</Text>
-      <Text style={permStyles.sottotitolo}>
-        Per scattare foto è necessario consentire l'accesso alla fotocamera
-        nelle impostazioni del dispositivo.
-      </Text>
-      <TouchableOpacity style={permStyles.btnPrimary} onPress={onRichiedi}>
-        <Text style={permStyles.btnPrimaryText}>Richiedi permesso</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={permStyles.btnSecondary} onPress={onChiudi}>
-        <Text style={permStyles.btnSecondaryText}>Chiudi</Text>
-      </TouchableOpacity>
-    </View>
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 6l12 12M18 6L6 18"
+        stroke={color}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+    </Svg>
   );
 }
 
-/**
- * Overlay di preview post-scatto con pulsanti Conferma / Riprova / Annulla.
- */
-function PreviewOverlay({
-  foto,
-  isSaving,
-  onConferma,
-  onRiprova,
-  onAnnulla,
-}: {
-  foto:       FotoScattata;
-  isSaving:   boolean;
-  onConferma: () => void;
-  onRiprova:  () => void;
-  onAnnulla:  () => void;
-}) {
+/** Fulmine — torcia */
+function IconTorcia({ size = 22, color = '#FFFFFF' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M13 2.5 5.5 13.5h5L9.5 21.5 18.5 10h-5l-.5-7.5Z"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Frecce circolari — inverti fotocamera */
+function IconInverti({ size = 22, color = '#FFFFFF' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M19.5 9.5A8 8 0 0 0 6 6.2M4.5 14.5A8 8 0 0 0 18 17.8"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M19.5 4.5v5h-5M4.5 19.5v-5h5"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+/** Immagine con montagne — galleria foto */
+function IconGalleria({ size = 24, color = '#FFFFFF' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect
+        x={3}
+        y={5}
+        width={18}
+        height={14}
+        rx={3}
+        stroke={color}
+        strokeWidth={1.9}
+      />
+      <Circle cx={8.6} cy={10} r={1.7} stroke={color} strokeWidth={1.7} />
+      <Path
+        d="M5 17.5 9.2 13a1.5 1.5 0 0 1 2.1 0l5.7 5"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+      />
+      <Path
+        d="m14.5 15.5 1.9-1.9a1.5 1.5 0 0 1 2.1 0l2.5 2.4"
+        stroke={color}
+        strokeWidth={1.9}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+export default function CameraScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  return (
-    <View style={StyleSheet.absoluteFillObject}>
-      {/* Immagine preview a pieno schermo */}
-      <Image
-        source={{ uri: foto.uri }}
-        style={styles.previewImage}
-        resizeMode="cover"
-      />
+  const fascicoloId = Number(id);
+  const cameraRef = useRef<CameraView>(null);
 
-      {/* Overlay scuro semi-trasparente in basso */}
-      <View style={[previewStyles.bar, { paddingBottom: insets.bottom + 16 }]}>
-        {isSaving ? (
-          <View style={previewStyles.savingRow}>
-            <ActivityIndicator size="small" color="#FFFFFF" />
-            <Text style={previewStyles.savingText}>Salvataggio foto...</Text>
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [libraryPermission, requestLibraryPermission] = ImagePicker.useMediaLibraryPermissions();
+
+  const [facing, setFacing] = useState<CameraType>('back');
+  const [torchEnabled, setTorchEnabled] = useState(false);   // ← Usiamo torch invece di flash
+  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
+
+  const aggiungiFotoFn = useFascicoliStore((s) => s.aggiungiFoto);
+
+  // Richiedi permessi
+  React.useEffect(() => {
+    if (cameraPermission === null) requestCameraPermission();
+  }, [cameraPermission]);
+
+  // ─────────────────────────────────────────
+  // FOTOCAMERA
+  // ─────────────────────────────────────────
+  const takePhoto = useCallback(async () => {
+    if (!cameraRef.current || !isCameraReady) return;
+
+    try {
+      const result = await cameraRef.current.takePictureAsync({
+        quality: 0.85,
+        skipProcessing: true,
+      });
+      if (result?.uri) {
+        setSelectedPhotos((prev) => [...prev, result.uri]);
+      }
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Errore durante lo scatto' });
+    }
+  }, [isCameraReady]);
+
+  const flipCamera = () => setFacing((prev) => (prev === 'back' ? 'front' : 'back'));
+  
+  const toggleTorch = () => setTorchEnabled((prev) => !prev);   // ← Toggle torch
+
+  // ─────────────────────────────────────────
+  // MULTI-SELEZIONE LIBRERIA
+  // ─────────────────────────────────────────
+  const openLibrary = useCallback(async () => {
+    if (!libraryPermission?.granted) {
+      const { granted } = await requestLibraryPermission();
+      if (!granted) {
+        Alert.alert('Permesso negato', 'Concedi l’accesso alla libreria foto.');
+        return;
+      }
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.85,
+      });
+
+      if (!result.canceled && result.assets?.length > 0) {
+        const newUris = result.assets.map((asset) => asset.uri);
+        setSelectedPhotos((prev) => [...prev, ...newUris]);
+        Toast.show({ type: 'success', text1: `${newUris.length} foto selezionate` });
+      }
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Impossibile aprire la libreria' });
+    }
+  }, [libraryPermission]);
+
+  // ─────────────────────────────────────────
+  // SALVATAGGIO
+  // ─────────────────────────────────────────
+  const saveAllPhotos = useCallback(async () => {
+    if (selectedPhotos.length === 0) return;
+
+    setIsSaving(true);
+    let savedCount = 0;
+
+    try {
+      for (const uri of selectedPhotos) {
+        await aggiungiFotoFn(fascicoloId, uri);
+        savedCount++;
+      }
+
+      Toast.show({
+        type: 'success',
+        text1: `${savedCount} foto salvate con successo`,
+      });
+
+      router.back();
+    } catch (error) {
+      Toast.show({ type: 'error', text1: 'Errore durante il salvataggio' });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [selectedPhotos, fascicoloId, aggiungiFotoFn, router]);
+
+  const removePhoto = (index: number) => {
+    setSelectedPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const clearAll = () => setSelectedPhotos([]);
+
+  // ─────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────
+  if (!cameraPermission?.granted) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.textWhite}>Accesso alla fotocamera necessario</Text>
+        <TouchableOpacity onPress={requestCameraPermission} style={styles.btn}>
+          <Text style={styles.btnText}>Abilita fotocamera</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {selectedPhotos.length === 0 ? (
+        <CameraView
+          ref={cameraRef}
+          style={styles.camera}
+          facing={facing}
+          enableTorch={torchEnabled}           // ← Usa enableTorch invece di flash
+          onCameraReady={() => setIsCameraReady(true)}
+          ratio="16:9"
+        />
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={PREVIEW_W + PREVIEW_GAP}
+          decelerationRate="fast"
+          contentContainerStyle={styles.previewScrollContent}
+          style={styles.previewScroll}
+        >
+          {selectedPhotos.map((uri, index) => (
+            <View key={index} style={styles.previewItem}>
+              <Image 
+                source={{ uri }} 
+                style={styles.previewImage} 
+                resizeMode="contain"
+              />
+              <TouchableOpacity style={styles.removeBtn} onPress={() => removePhoto(index)}>
+                <Text style={styles.removeText}>✕</Text>
+              </TouchableOpacity>
+
+              <View style={styles.photoNumber}>
+                <Text style={styles.photoNumberText}>{index + 1}</Text>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Top Bar */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
+          <IconChiudi />
+        </TouchableOpacity>
+
+        <View style={styles.topBarRight}>
+          <TouchableOpacity
+            onPress={toggleTorch}
+            style={[styles.iconButton, torchEnabled && styles.iconButtonActive]}
+          >
+            <IconTorcia color={torchEnabled ? '#101828' : '#FFFFFF'} />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={flipCamera} style={styles.iconButton}>
+            <IconInverti />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Bottom Bar */}
+      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 20 }]}>
+        {selectedPhotos.length === 0 ? (
+          <View style={styles.controlsRow}>
+            <TouchableOpacity onPress={openLibrary} style={styles.sideButton}>
+              <View style={styles.sideButtonCircle}>
+                <IconGalleria />
+              </View>
+              <Text style={styles.sideButtonLabel} numberOfLines={1}>
+                Galleria
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={takePhoto}
+              style={[styles.shutterButton, !isCameraReady && styles.shutterDisabled]}
+              disabled={!isCameraReady}
+            >
+              <View style={styles.shutterInner} />
+            </TouchableOpacity>
+
+            <View style={styles.sideButton} />
           </View>
         ) : (
-          <View style={previewStyles.azioniRow}>
-            {/* Riprova */}
+          <View style={styles.previewActions}>
+            {/* Azione primaria a tutta larghezza */}
             <TouchableOpacity
-              style={previewStyles.btnSecondario}
-              onPress={onRiprova}
-              activeOpacity={0.8}
+              onPress={saveAllPhotos}
+              style={[styles.actionButton, styles.confermaButton]}
+              disabled={isSaving}
             >
-              <Text style={previewStyles.btnSecondarioText}>Riprova</Text>
+              {isSaving ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.confermaText}>
+                  Salva {selectedPhotos.length} {selectedPhotos.length === 1 ? 'foto' : 'foto'}
+                </Text>
+              )}
             </TouchableOpacity>
 
-            {/* Conferma */}
-            <TouchableOpacity
-              style={previewStyles.btnConferma}
-              onPress={onConferma}
-              activeOpacity={0.85}
-            >
-              <Text style={previewStyles.btnConfermaText}>Usa foto</Text>
-            </TouchableOpacity>
+            {/* Azioni secondarie affiancate */}
+            <View style={styles.secondaryRow}>
+              <TouchableOpacity
+                onPress={clearAll}
+                style={[styles.actionButton, styles.secondaryButton]}
+              >
+                <Text style={styles.actionText}>Cancella tutto</Text>
+              </TouchableOpacity>
 
-            {/* Annulla */}
-            <TouchableOpacity
-              style={previewStyles.btnSecondario}
-              onPress={onAnnulla}
-              activeOpacity={0.8}
-            >
-              <Text style={previewStyles.btnSecondarioText}>Annulla</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={[styles.actionButton, styles.secondaryButton]}
+              >
+                <Text style={styles.actionText}>Annulla</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
       </View>
@@ -137,480 +364,188 @@ function PreviewOverlay({
   );
 }
 
-// ─────────────────────────────────────────────
-// SCHERMATA PRINCIPALE
-// ─────────────────────────────────────────────
-
-export default function CameraScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const router  = useRouter();
-  const insets  = useSafeAreaInsets();
-
-  const fascicoloId    = Number(id);
-  const cameraRef      = useRef<Camera>(null);
-
-  // ── Stato locale ──
-  const [cameraType,   setCameraType]   = useState<CameraType>(CameraType.back);
-  const [flashMode,    setFlashMode]    = useState<FlashMode>(FlashMode.off);
-  const [fotoPreview,  setFotoPreview]  = useState<FotoScattata | null>(null);
-  const [isSaving,     setIsSaving]     = useState(false);
-  const [cameraReady,  setCameraReady]  = useState(false);
-
-  // ── Hook fotocamera ──
-  const {
-    hasPermission,
-    requestPermission,
-    apriLibreria,
-    scattaFoto,
-    isProcessing,
-  } = useCamera();
-
-  // ── Store ──
-  const aggiungiFotoFn = useFascicoliStore((s) => s.aggiungiFoto);
-
-  // ── Richiedi permesso al mount ──
-  useEffect(() => {
-    if (hasPermission === null) {
-      requestPermission();
-    }
-  }, [hasPermission, requestPermission]);
-
-  // ─────────────────────────────────────────
-  // HANDLERS — CAMERA
-  // ─────────────────────────────────────────
-
-  const handleFlipCamera = useCallback(() => {
-    setCameraType((prev) =>
-      prev === CameraType.back ? CameraType.front : CameraType.back
-    );
-  }, []);
-
-  const handleToggleFlash = useCallback(() => {
-    setFlashMode((prev) =>
-      prev === FlashMode.off ? FlashMode.on : FlashMode.off
-    );
-  }, []);
-
-  const handleScatta = useCallback(async () => {
-    if (!cameraReady || isProcessing) return;
-    const foto = await scattaFoto(cameraRef);
-    if (foto) {
-      setFotoPreview(foto);
-    }
-  }, [cameraReady, isProcessing, scattaFoto]);
-
-  const handleApriLibreria = useCallback(async () => {
-    const foto = await apriLibreria();
-    if (foto) {
-      setFotoPreview(foto);
-    }
-  }, [apriLibreria]);
-
-  // ─────────────────────────────────────────
-  // HANDLERS — PREVIEW
-  // ─────────────────────────────────────────
-
-  /**
-   * Conferma la foto: la copia nella directory permanente
-   * e la registra nel DB tramite lo store.
-   */
-  const handleConferma = useCallback(async () => {
-    if (!fotoPreview) return;
-
-    setIsSaving(true);
-    try {
-      await aggiungiFotoFn(
-        fascicoloId,
-        fotoPreview.uri,
-        fotoPreview.dataScatto
-      );
-
-      Toast.show({
-        type:  'success',
-        text1: TOAST_MESSAGES.FOTO_AGGIUNTA,
-      });
-
-      // Torna alla camera per scattare un'altra foto
-      setFotoPreview(null);
-    } catch (error) {
-      Toast.show({
-        type:  'error',
-        text1: 'Errore salvataggio foto',
-        text2: error instanceof Error ? error.message : TOAST_MESSAGES.ERRORE_GENERICO,
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  }, [fotoPreview, fascicoloId, aggiungiFotoFn]);
-
-  /** Scarta la foto e torna alla camera live. */
-  const handleRiprova = useCallback(() => {
-    setFotoPreview(null);
-  }, []);
-
-  /** Chiude la schermata fotocamera e torna al dettaglio. */
-  const handleChiudi = useCallback(() => {
-    router.back();
-  }, [router]);
-
-  // ─────────────────────────────────────────
-  // RENDER — PERMESSO NEGATO
-  // ─────────────────────────────────────────
-
-  if (hasPermission === false) {
-    return (
-      <PermessoNegato
-        onRichiedi={requestPermission}
-        onChiudi={handleChiudi}
-      />
-    );
-  }
-
-  // ─────────────────────────────────────────
-  // RENDER — LOADING PERMESSO
-  // ─────────────────────────────────────────
-
-  if (hasPermission === null) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
-        <Text style={styles.loadingText}>Accesso fotocamera...</Text>
-      </View>
-    );
-  }
-
-  // ─────────────────────────────────────────
-  // RENDER — CAMERA
-  // ─────────────────────────────────────────
-
-  return (
-    <View style={styles.container}>
-      {/* ── Camera live ── */}
-      <Camera
-        ref={cameraRef}
-        style={styles.camera}
-        type={cameraType}
-        flashMode={flashMode}
-        onCameraReady={() => setCameraReady(true)}
-        ratio="16:9"
-      />
-
-      {/* ── Overlay controlli superiori ── */}
-      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        {/* Chiudi */}
-        <TouchableOpacity
-          style={styles.iconButton}
-          onPress={handleChiudi}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.iconButtonText}>✕</Text>
-        </TouchableOpacity>
-
-        {/* Flash toggle */}
-        <TouchableOpacity
-          style={[
-            styles.iconButton,
-            flashMode === FlashMode.on && styles.iconButtonActive,
-          ]}
-          onPress={handleToggleFlash}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.iconButtonText}>
-            {flashMode === FlashMode.on ? '⚡' : '⚡'}
-          </Text>
-          {flashMode === FlashMode.off && (
-            <View style={styles.flashOff} />
-          )}
-        </TouchableOpacity>
-
-        {/* Flip camera */}
-        <TouchableOpacity
-          style={styles.iconButton}
-          onPress={handleFlipCamera}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.iconButtonText}>🔄</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Barra inferiore: libreria + scatta + placeholder ── */}
-      <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
-        {/* Pulsante libreria */}
-        <TouchableOpacity
-          style={styles.sideButton}
-          onPress={handleApriLibreria}
-          disabled={isProcessing}
-          activeOpacity={0.8}
-        >
-          <View style={styles.sideButtonInner}>
-            <Text style={styles.sideButtonText}>Libreria</Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* Pulsante scatto */}
-        <TouchableOpacity
-          style={[
-            styles.shutterButton,
-            (!cameraReady || isProcessing) && styles.shutterButtonDisabled,
-          ]}
-          onPress={handleScatta}
-          disabled={!cameraReady || isProcessing}
-          activeOpacity={0.85}
-        >
-          <View style={styles.shutterInner}>
-            {isProcessing && (
-              <ActivityIndicator size="small" color="#6366F1" />
-            )}
-          </View>
-        </TouchableOpacity>
-
-        {/* Placeholder destra (bilanciamento layout) */}
-        <View style={styles.sideButton} />
-      </View>
-
-      {/* ── Preview post-scatto ── */}
-      {fotoPreview && (
-        <PreviewOverlay
-          foto={fotoPreview}
-          isSaving={isSaving}
-          onConferma={handleConferma}
-          onRiprova={handleRiprova}
-          onAnnulla={handleChiudi}
-        />
-      )}
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────
-// STILI
-// ─────────────────────────────────────────────
-
+// STILI (invariati, solo per completezza)
 const styles = StyleSheet.create({
-  container: {
-    flex:            1,
-    backgroundColor: '#000000',
+  container: { flex: 1, backgroundColor: '#000' },
+  camera: { flex: 1 },
+
+  previewScroll: { flex: 1, backgroundColor: '#000' },
+  previewScrollContent: {
+    paddingHorizontal: PREVIEW_SIDE_PAD,
+    alignItems: 'center',
+    gap: PREVIEW_GAP,
   },
-  camera: {
-    flex: 1,
+  previewItem: {
+    width: PREVIEW_W,
+    height: PREVIEW_H,
+    backgroundColor: '#050C1C',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  loadingContainer: {
-    flex:            1,
-    backgroundColor: '#000000',
-    alignItems:      'center',
-    justifyContent:  'center',
-    gap:             16,
+  previewImage: { width: '100%', height: '100%' },
+
+  removeBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(217,45,32,0.95)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  loadingText: {
-    color:    '#FFFFFF',
-    fontSize: 15,
-    opacity:  0.8,
+  removeText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+
+  photoNumber: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
+  photoNumberText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
   topBar: {
-    position:          'absolute',
-    top:               0,
-    left:              0,
-    right:             0,
-    flexDirection:     'row',
-    justifyContent:    'space-between',
-    alignItems:        'center',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingBottom:     12,
-    // Gradiente simulato con overlay scuro
-    backgroundColor:   'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   iconButton: {
-    width:           44,
-    height:          44,
-    borderRadius:    22,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems:      'center',
-    justifyContent:  'center',
-    borderWidth:     1,
-    borderColor:     'rgba(255,255,255,0.15)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(16,24,40,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   iconButtonActive: {
-    backgroundColor: 'rgba(250,204,21,0.3)',
-    borderColor:     'rgba(250,204,21,0.6)',
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
   },
-  iconButtonText: {
-    fontSize: 16,
-    color:    '#FFFFFF',
+  topBarRight: {
+    flexDirection: 'row',
+    gap: 10,
   },
-  flashOff: {
-    position:        'absolute',
-    width:           2,
-    height:          24,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    transform:       [{ rotate: '45deg' }],
-    borderRadius:    1,
-  },
+
   bottomBar: {
-    position:          'absolute',
-    bottom:            0,
-    left:              0,
-    right:             0,
-    flexDirection:     'row',
-    justifyContent:    'space-between',
-    alignItems:        'center',
-    paddingHorizontal: 32,
-    paddingTop:        20,
-    backgroundColor:   'rgba(0,0,0,0.5)',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingTop: 18,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingHorizontal: 30,
   },
   sideButton: {
-    width:          72,
-    alignItems:     'center',
+    // 72px non bastavano a "GALLERIA" in maiuscolo spaziato: con i caratteri
+    // ingranditi dalle impostazioni di sistema l'ultima lettera andava a capo.
+    // Lo spaziatore a destra usa lo stesso stile, quindi lo scatto resta centrato.
+    width: 92,
+    alignItems: 'center',
+    gap: 6,
+  },
+  sideButtonCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(16,24,40,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  sideButtonInner: {
-    backgroundColor:   'rgba(255,255,255,0.15)',
-    borderRadius:      10,
-    paddingHorizontal: 12,
-    paddingVertical:   8,
-    borderWidth:       1,
-    borderColor:       'rgba(255,255,255,0.25)',
+  sideButtonLabel: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
-  sideButtonText: {
-    color:      '#FFFFFF',
-    fontSize:   13,
-    fontWeight: '500',
-  },
+
   shutterButton: {
-    width:           76,
-    height:          76,
-    borderRadius:    38,
-    backgroundColor: '#FFFFFF',
-    alignItems:      'center',
-    justifyContent:  'center',
-    borderWidth:     4,
-    borderColor:     'rgba(255,255,255,0.4)',
-    // Anello esterno
-    shadowColor:     '#FFFFFF',
-    shadowOffset:    { width: 0, height: 0 },
-    shadowOpacity:   0.4,
-    shadowRadius:    8,
-  },
-  shutterButtonDisabled: {
-    opacity: 0.5,
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 6,
+    borderColor: 'rgba(255,255,255,0.7)',
   },
   shutterInner: {
-    width:           58,
-    height:          58,
-    borderRadius:    29,
-    backgroundColor: '#FFFFFF',
-    alignItems:      'center',
-    justifyContent:  'center',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#fff',
+    borderWidth: 3,
+    borderColor: '#0F6B70',
   },
-  previewImage: {
-    width:  SCREEN_W,
-    height: SCREEN_H,
-  },
-});
+  shutterDisabled: { opacity: 0.5 },
 
-const previewStyles = StyleSheet.create({
-  bar: {
-    position:          'absolute',
-    bottom:            0,
-    left:              0,
-    right:             0,
-    backgroundColor:   'rgba(0,0,0,0.65)',
-    paddingTop:        20,
-    paddingHorizontal: 24,
+  previewActions: {
+    width: '100%',
+    paddingHorizontal: 20,
+    gap: 10,
   },
-  azioniRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    paddingBottom:  8,
+  secondaryRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
-  btnConferma: {
-    backgroundColor:   '#6366F1',
-    borderRadius:      14,
-    paddingHorizontal: 28,
-    paddingVertical:   14,
-    minWidth:          120,
-    alignItems:        'center',
-  },
-  btnConfermaText: {
-    color:      '#FFFFFF',
-    fontSize:   16,
-    fontWeight: '700',
-  },
-  btnSecondario: {
-    backgroundColor:   'rgba(255,255,255,0.12)',
-    borderRadius:      12,
-    paddingHorizontal: 16,
-    paddingVertical:   12,
-    borderWidth:       1,
-    borderColor:       'rgba(255,255,255,0.2)',
-    minWidth:          80,
-    alignItems:        'center',
-  },
-  btnSecondarioText: {
-    color:      '#FFFFFF',
-    fontSize:   14,
-    fontWeight: '500',
-  },
-  savingRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
+  actionButton: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    gap:            12,
   },
-  savingText: {
-    color:    '#FFFFFF',
-    fontSize: 15,
-    opacity:  0.9,
+  secondaryButton: {
+    flex: 1,
   },
-});
+  confermaButton: {
+    backgroundColor: '#0F6B70',
+    borderColor: '#0F6B70',
+  },
+  actionText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  confermaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
-const permStyles = StyleSheet.create({
-  container: {
-    flex:              1,
-    backgroundColor:   '#111827',
-    alignItems:        'center',
-    justifyContent:    'center',
-    paddingHorizontal: 40,
-    gap:               16,
+  center: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
   },
-  icon: {
-    fontSize:     56,
-    marginBottom: 8,
-  },
-  titolo: {
-    fontSize:   22,
-    fontWeight: '700',
-    color:      '#FFFFFF',
-    textAlign:  'center',
-  },
-  sottotitolo: {
-    fontSize:   15,
-    color:      'rgba(255,255,255,0.6)',
-    textAlign:  'center',
-    lineHeight: 22,
-    marginBottom: 8,
-  },
-  btnPrimary: {
-    backgroundColor:   '#6366F1',
-    borderRadius:      12,
+  textWhite: { color: '#fff', fontSize: 18, textAlign: 'center' },
+  btn: {
+    backgroundColor: '#0F6B70',
     paddingHorizontal: 28,
-    paddingVertical:   14,
-    width:             '100%',
-    alignItems:        'center',
+    paddingVertical: 16,
+    borderRadius: 12,
   },
-  btnPrimaryText: {
-    color:      '#FFFFFF',
-    fontSize:   16,
-    fontWeight: '600',
-  },
-  btnSecondary: {
-    paddingVertical: 12,
-    alignItems:      'center',
-    width:           '100%',
-  },
-  btnSecondaryText: {
-    color:    'rgba(255,255,255,0.55)',
-    fontSize: 15,
-  },
+  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

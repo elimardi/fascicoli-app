@@ -65,6 +65,41 @@ const MIGRATIONS: DbMigration[] = [
         ON foto (fascicolo_id, ordinamento)
     `,
   },
+  {
+    version: 2,
+    description:
+      'Config estesa: branding (nome_societa, logo), OAuth (therm_token, endpoint, cache token)',
+    sql: `
+      ALTER TABLE config_webservice ADD COLUMN therm_token TEXT NOT NULL DEFAULT '';
+      ALTER TABLE config_webservice ADD COLUMN auth_endpoint TEXT NOT NULL DEFAULT 'authenticate/oauth/token';
+      ALTER TABLE config_webservice ADD COLUMN invio_endpoint TEXT NOT NULL DEFAULT 'YUploadDocDgtMultipli';
+      ALTER TABLE config_webservice ADD COLUMN nome_societa TEXT NOT NULL DEFAULT '';
+      ALTER TABLE config_webservice ADD COLUMN logo_base64 TEXT NOT NULL DEFAULT '';
+      ALTER TABLE config_webservice ADD COLUMN cached_access_token TEXT;
+      ALTER TABLE config_webservice ADD COLUMN token_expires_at INTEGER;
+      UPDATE config_webservice SET therm_token = auth_token WHERE therm_token = ''
+    `,
+  },
+  {
+    version: 3,
+    description:
+      'Endpoint invio documenti aggiornato a YUploadDocDgtMultipli (solo se ancora al vecchio default)',
+    sql: `
+      UPDATE config_webservice
+        SET invio_endpoint = 'YUploadDocDgtMultipli'
+        WHERE invio_endpoint = 'YWSCadDocDgtPacking'
+    `,
+  },
+  {
+    version: 4,
+    description:
+      'Attributi foto (descrizione, catalogo) + rimozione colonna legacy auth_token',
+    sql: `
+      ALTER TABLE config_webservice ADD COLUMN descrizione_foto TEXT NOT NULL DEFAULT '';
+      ALTER TABLE config_webservice ADD COLUMN catalogo_foto TEXT NOT NULL DEFAULT '';
+      ALTER TABLE config_webservice DROP COLUMN auth_token
+    `,
+  },
 ];
 
 async function getCurrentVersion(db: SQLite.SQLiteDatabase): Promise<number> {

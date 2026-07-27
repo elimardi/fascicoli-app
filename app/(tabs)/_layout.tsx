@@ -6,11 +6,61 @@
  */
 
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, Text, Image, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { useConfigStore } from '@/store/config.store';
+import { Colors } from '@/constants/theme';
+
+/**
+ * Titolo header personalizzato con logo e nome società.
+ * Se non configurati, mostra il titolo di default "Fascicoli".
+ */
+function BrandedHeaderTitle() {
+  const config = useConfigStore((s) => s.config);
+
+  const nome = config?.nome_societa?.trim() || 'Fascicoli';
+  const logo = config?.logo_base64 || '';
+
+  return (
+    <View style={brandStyles.container}>
+      {logo ? (
+        <Image
+          source={{ uri: `data:image/png;base64,${logo}` }}
+          style={brandStyles.logo}
+          resizeMode="contain"
+        />
+      ) : null}
+      <Text style={brandStyles.title} numberOfLines={1}>
+        {nome}
+      </Text>
+    </View>
+  );
+}
+
+const brandStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           10,
+    maxWidth:      280,
+  },
+  logo: {
+    width:           30,
+    height:          30,
+    borderRadius:    8,
+    borderWidth:     1,
+    borderColor:     Colors.brandNavyLine,
+    backgroundColor: Colors.brandNavySoft,
+  },
+  title: {
+    fontSize:      18,
+    fontWeight:    '700',
+    letterSpacing: -0.4,
+    color:         '#FFFFFF',
+  },
+});
 
 interface TabIconProps {
   color:   string;
@@ -73,24 +123,30 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor:   '#6366F1',
-        tabBarInactiveTintColor: '#9CA3AF',
+        tabBarActiveTintColor:   Colors.brandCyan,
+        tabBarInactiveTintColor: Colors.brandSilver,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
+          backgroundColor: Colors.brandNavy,
           borderTopWidth:  1,
-          borderTopColor:  '#F3F4F6',
+          borderTopColor:  Colors.brandNavyLine,
           height:          56 + insets.bottom,
           paddingBottom:   insets.bottom,
           paddingTop:      8,
         },
         tabBarLabelStyle: {
-          fontSize:   11,
-          fontWeight: '500',
-          marginTop:  2,
+          fontSize:      11,
+          fontWeight:    '700',
+          letterSpacing: 0.2,
+          marginTop:     2,
         },
-        headerStyle:         { backgroundColor: '#FFFFFF' },
-        headerTintColor:     '#111827',
-        headerTitleStyle:    { fontWeight: '600', fontSize: 17 },
+        headerStyle:         { backgroundColor: Colors.brandNavy },
+        headerTintColor:     '#FFFFFF',
+        headerTitleStyle:    {
+          fontWeight:    '700',
+          fontSize:      17,
+          letterSpacing: -0.3,
+          color:         '#FFFFFF',
+        },
         headerShadowVisible: false,
       }}
     >
@@ -99,6 +155,7 @@ export default function TabsLayout() {
         options={{
           title:       'Fascicoli',
           tabBarLabel: 'Fascicoli',
+          headerTitle: () => <BrandedHeaderTitle />,
           tabBarIcon:  ({ color, focused }) => (
             <IconFascicoli color={color} focused={focused} />
           ),
@@ -129,7 +186,7 @@ const badgeStyles = StyleSheet.create({
     width:           10,
     height:          10,
     borderRadius:    5,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.brandNavy,
     alignItems:      'center',
     justifyContent:  'center',
   },

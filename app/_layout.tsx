@@ -11,10 +11,12 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Toast, { type BaseToastProps } from 'react-native-toast-message';
 import { useDatabase } from '@/hooks/useDatabase';
+import { Colors, Radius } from '@/constants/theme';
 
 // ─────────────────────────────────────────────
 // TOAST CONFIG
@@ -24,33 +26,31 @@ import { useDatabase } from '@/hooks/useDatabase';
  * Configurazione personalizzata dei toast per react-native-toast-message.
  * Tre tipi: success (verde), error (rosso), info (indigo).
  */
+function ToastBase({
+  text1,
+  text2,
+  spineColor,
+}: BaseToastProps & { spineColor: string }) {
+  return (
+    <View style={toastStyles.toast}>
+      <View style={[toastStyles.spine, { backgroundColor: spineColor }]} />
+      <View style={toastStyles.textContainer}>
+        {text1 ? <Text style={toastStyles.title}>{text1}</Text> : null}
+        {text2 ? <Text style={toastStyles.subtitle}>{text2}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 const toastConfig = {
-  success: ({ text1, text2 }: BaseToastProps) => (
-    <View style={[toastStyles.toast, toastStyles.success]}>
-      <View style={toastStyles.dot} />
-      <View style={toastStyles.textContainer}>
-        {text1 ? <Text style={toastStyles.title}>{text1}</Text> : null}
-        {text2 ? <Text style={toastStyles.subtitle}>{text2}</Text> : null}
-      </View>
-    </View>
+  success: (props: BaseToastProps) => (
+    <ToastBase {...props} spineColor={Colors.success} />
   ),
-  error: ({ text1, text2 }: BaseToastProps) => (
-    <View style={[toastStyles.toast, toastStyles.error]}>
-      <View style={[toastStyles.dot, toastStyles.dotError]} />
-      <View style={toastStyles.textContainer}>
-        {text1 ? <Text style={toastStyles.title}>{text1}</Text> : null}
-        {text2 ? <Text style={toastStyles.subtitle}>{text2}</Text> : null}
-      </View>
-    </View>
+  error: (props: BaseToastProps) => (
+    <ToastBase {...props} spineColor={Colors.danger} />
   ),
-  info: ({ text1, text2 }: BaseToastProps) => (
-    <View style={[toastStyles.toast, toastStyles.info]}>
-      <View style={[toastStyles.dot, toastStyles.dotInfo]} />
-      <View style={toastStyles.textContainer}>
-        {text1 ? <Text style={toastStyles.title}>{text1}</Text> : null}
-        {text2 ? <Text style={toastStyles.subtitle}>{text2}</Text> : null}
-      </View>
-    </View>
+  info: (props: BaseToastProps) => (
+    <ToastBase {...props} spineColor={Colors.primary} />
   ),
 };
 
@@ -61,7 +61,7 @@ const toastConfig = {
 function LoadingScreen() {
   return (
     <View style={splashStyles.container}>
-      <ActivityIndicator size="large" color="#6366F1" />
+      <ActivityIndicator size="large" color={Colors.brandCyan} />
       <Text style={splashStyles.text}>Caricamento...</Text>
     </View>
   );
@@ -104,11 +104,15 @@ export default function RootLayout() {
         {isReady && (
           <Stack
             screenOptions={{
-              headerStyle:      { backgroundColor: '#FFFFFF' },
-              headerTintColor:  '#111827',
-              headerTitleStyle: { fontWeight: '600', fontSize: 17 },
+              headerStyle:      { backgroundColor: Colors.brandNavy },
+              headerTintColor:  '#FFFFFF',
+              headerTitleStyle: {
+                fontWeight: '700',
+                fontSize:   17,
+                color:      '#FFFFFF',
+              },
               headerShadowVisible: false,
-              contentStyle:     { backgroundColor: '#F9FAFB' },
+              contentStyle:     { backgroundColor: Colors.bg },
             }}
           >
             <Stack.Screen name="(tabs)"  options={{ headerShown: false }} />
@@ -117,7 +121,7 @@ export default function RootLayout() {
               options={{
                 title:         'Nuovo fascicolo',
                 presentation:  'modal',
-                headerStyle:   { backgroundColor: '#FFFFFF' },
+                headerStyle:   { backgroundColor: Colors.brandNavy },
               }}
             />
             <Stack.Screen
@@ -136,6 +140,7 @@ export default function RootLayout() {
           </Stack>
         )}
         <Toast config={toastConfig} topOffset={56} />
+        <StatusBar style="light" />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
@@ -150,13 +155,14 @@ const splashStyles = StyleSheet.create({
     flex:            1,
     alignItems:      'center',
     justifyContent:  'center',
-    backgroundColor: '#F9FAFB',
+    // Stesso navy dello splash: nessuno stacco bianco all'avvio
+    backgroundColor: Colors.brandNavy,
     padding:         32,
   },
   text: {
     marginTop: 16,
     fontSize:  16,
-    color:     '#6B7280',
+    color:     Colors.brandSilver,
   },
   errorIcon: {
     fontSize:     48,
@@ -164,22 +170,22 @@ const splashStyles = StyleSheet.create({
   },
   errorTitle: {
     fontSize:     20,
-    fontWeight:   '600',
-    color:        '#111827',
+    fontWeight:   '700',
+    color:        '#FFFFFF',
     marginBottom: 8,
   },
   errorMessage: {
-    fontSize:   14,
-    color:      '#6B7280',
-    textAlign:  'center',
-    lineHeight: 20,
+    fontSize:     14,
+    color:        Colors.brandSilver,
+    textAlign:    'center',
+    lineHeight:   20,
     marginBottom: 24,
   },
   retryButton: {
-    backgroundColor: '#6366F1',
+    backgroundColor:   Colors.primary,
     paddingHorizontal: 24,
     paddingVertical:   12,
-    borderRadius:      10,
+    borderRadius:      Radius.md,
   },
   retryText: {
     color:      '#FFFFFF',
@@ -190,57 +196,36 @@ const splashStyles = StyleSheet.create({
 
 const toastStyles = StyleSheet.create({
   toast: {
-    flexDirection:     'row',
-    alignItems:        'center',
-    marginHorizontal:  16,
-    paddingHorizontal: 16,
-    paddingVertical:   12,
-    borderRadius:      12,
-    borderWidth:       1,
-    borderColor:       '#E5E7EB',
-    backgroundColor:   '#FFFFFF',
-    shadowColor:       '#000',
-    shadowOffset:      { width: 0, height: 2 },
-    shadowOpacity:     0.08,
-    shadowRadius:      8,
-    elevation:         4,
-    gap:               12,
+    flexDirection:    'row',
+    alignItems:       'stretch',
+    marginHorizontal: 16,
+    borderRadius:     Radius.md,
+    borderWidth:      1,
+    borderColor:      Colors.hairline,
+    backgroundColor:  Colors.surface,
+    overflow:         'hidden',
+    shadowColor:      '#101828',
+    shadowOffset:     { width: 0, height: 4 },
+    shadowOpacity:    0.10,
+    shadowRadius:     12,
+    elevation:        5,
   },
-  success: {
-    borderColor: '#D1FAE5',
-    backgroundColor: '#F0FDF4',
-  },
-  error: {
-    borderColor: '#FEE2E2',
-    backgroundColor: '#FFF5F5',
-  },
-  info: {
-    borderColor: '#E0E7FF',
-    backgroundColor: '#EEF2FF',
-  },
-  dot: {
-    width:        8,
-    height:       8,
-    borderRadius: 4,
-    backgroundColor: '#10B981',
-  },
-  dotError: {
-    backgroundColor: '#EF4444',
-  },
-  dotInfo: {
-    backgroundColor: '#6366F1',
+  spine: {
+    width: 4,
   },
   textContainer: {
-    flex: 1,
+    flex:              1,
+    paddingHorizontal: 14,
+    paddingVertical:   12,
   },
   title: {
     fontSize:   14,
-    fontWeight: '600',
-    color:      '#111827',
+    fontWeight: '700',
+    color:      Colors.ink,
   },
   subtitle: {
-    fontSize:  12,
-    color:     '#6B7280',
+    fontSize:  12.5,
+    color:     Colors.inkMuted,
     marginTop: 2,
   },
 });

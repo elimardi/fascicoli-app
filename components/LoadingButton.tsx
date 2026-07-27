@@ -1,8 +1,8 @@
 /**
  * @file components/LoadingButton.tsx
  * Pulsante con stato di caricamento integrato.
- * Mostra uno spinner e si disabilita automaticamente durante
- * operazioni asincrone, prevenendo doppi tap.
+ * Varianti: primary (ottanio pieno), danger, secondary (bianco con
+ * bordo), ghost (tinta accento).
  */
 
 import React from 'react';
@@ -14,6 +14,7 @@ import {
   type ViewStyle,
   type TextStyle,
 } from 'react-native';
+import { Colors, Radius } from '@/constants/theme';
 
 // ─────────────────────────────────────────────
 // TIPI
@@ -51,55 +52,42 @@ const VARIANT_STYLES: Record<
   { bg: string; bgDisabled: string; text: string; border?: string }
 > = {
   primary: {
-    bg:         '#6366F1',
-    bgDisabled: '#A5B4FC',
+    bg:         Colors.primary,
+    bgDisabled: Colors.primaryMuted,
     text:       '#FFFFFF',
   },
   danger: {
-    bg:         '#EF4444',
-    bgDisabled: '#FCA5A5',
+    bg:         '#D92D20',
+    bgDisabled: '#FDA29B',
     text:       '#FFFFFF',
   },
   secondary: {
-    bg:         '#F3F4F6',
-    bgDisabled: '#F9FAFB',
-    text:       '#374151',
-    border:     '#D1D5DB',
+    bg:         Colors.surface,
+    bgDisabled: Colors.surfaceSunken,
+    text:       Colors.inkSoft,
+    border:     Colors.hairlineStrong,
   },
   ghost: {
-    bg:         'transparent',
-    bgDisabled: 'transparent',
-    text:       '#6366F1',
-    border:     '#E0E0FD',
+    bg:         Colors.primaryTint,
+    bgDisabled: Colors.surfaceSunken,
+    text:       Colors.primary,
+    border:     Colors.primaryBorder,
   },
 };
 
 const SIZE_STYLES: Record<
   'sm' | 'md' | 'lg',
-  { paddingV: number; paddingH: number; fontSize: number; radius: number }
+  { height: number; paddingH: number; fontSize: number; radius: number }
 > = {
-  sm: { paddingV: 8,  paddingH: 14, fontSize: 13, radius: 8  },
-  md: { paddingV: 12, paddingH: 20, fontSize: 15, radius: 10 },
-  lg: { paddingV: 16, paddingH: 24, fontSize: 16, radius: 12 },
+  sm: { height: 36, paddingH: 14, fontSize: 13, radius: Radius.sm },
+  md: { height: 46, paddingH: 20, fontSize: 15, radius: Radius.md },
+  lg: { height: 52, paddingH: 24, fontSize: 16, radius: Radius.md },
 };
 
 // ─────────────────────────────────────────────
 // COMPONENTE
 // ─────────────────────────────────────────────
 
-/**
- * Pulsante con spinner di loading e gestione stato disabilitato.
- *
- * @example
- * <LoadingButton
- *   label="Invia al gestionale"
- *   loadingLabel="Invio in corso..."
- *   loading={loadingInvio}
- *   onPress={handleInvia}
- *   variant="primary"
- *   size="lg"
- * />
- */
 export function LoadingButton({
   label,
   loadingLabel,
@@ -111,7 +99,7 @@ export function LoadingButton({
   textStyle,
   size = 'md',
 }: LoadingButtonProps) {
-  const isDisabled = disabled || loading;
+  const isDisabled   = disabled || loading;
   const variantStyle = VARIANT_STYLES[variant];
   const sizeStyle    = SIZE_STYLES[size];
 
@@ -119,12 +107,12 @@ export function LoadingButton({
     <TouchableOpacity
       onPress={onPress}
       disabled={isDisabled}
-      activeOpacity={0.8}
+      activeOpacity={0.75}
       style={[
         styles.button,
         {
-          backgroundColor: isDisabled ? variantStyle.bgDisabled : variantStyle.bg,
-          paddingVertical:   sizeStyle.paddingV,
+          backgroundColor:   isDisabled ? variantStyle.bgDisabled : variantStyle.bg,
+          height:            sizeStyle.height,
           paddingHorizontal: sizeStyle.paddingH,
           borderRadius:      sizeStyle.radius,
           borderWidth:       variantStyle.border ? 1 : 0,
@@ -136,7 +124,11 @@ export function LoadingButton({
       {loading && (
         <ActivityIndicator
           size="small"
-          color={variant === 'secondary' || variant === 'ghost' ? '#6366F1' : '#FFFFFF'}
+          color={
+            variant === 'secondary' || variant === 'ghost'
+              ? Colors.primary
+              : '#FFFFFF'
+          }
           style={styles.spinner}
         />
       )}
@@ -146,7 +138,7 @@ export function LoadingButton({
           {
             color:    variantStyle.text,
             fontSize: sizeStyle.fontSize,
-            opacity:  isDisabled && !loading ? 0.6 : 1,
+            opacity:  isDisabled && !loading ? 0.55 : 1,
           },
           textStyle,
         ]}
@@ -171,7 +163,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   label: {
-    fontWeight: '600',
-    textAlign:  'center',
+    fontWeight:    '700',
+    letterSpacing: 0.2,
+    textAlign:     'center',
   },
 });
